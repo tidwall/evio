@@ -1,5 +1,8 @@
 # `✨ shiny ✨`
 
+[![Build Status](https://img.shields.io/travis/tidwall/shiny.svg?style=flat-square)](https://travis-ci.org/tidwall/shiny)
+[![GoDoc](https://img.shields.io/badge/api-reference-blue.svg?style=flat-square)](https://godoc.org/github.com/tidwall/shiny)
+
 Shiny is an alternative server framework for Go that uses I/O multiplexing.
 It makes direct [epoll](https://en.wikipedia.org/wiki/Epoll) and [kqueue](https://en.wikipedia.org/wiki/Kqueue) syscalls rather than the standard Go [net](https://golang.org/pkg/net/) package.
 
