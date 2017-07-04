@@ -15,6 +15,18 @@ func Serve(net, addr string,
 	closed func(id int, err error, ctx interface{}),
 	ticker func(ctx interface{}) (keepopen bool),
 	context interface{}) error {
+	if handle == nil {
+		handle = func(id int, data []byte, ctx interface{}) (send []byte, keepopen bool) { return nil, true }
+	}
+	if accept == nil {
+		accept = func(id int, addr string, wake func(), ctx interface{}) (send []byte, keepopen bool) { return nil, true }
+	}
+	if closed == nil {
+		closed = func(id int, err error, ctx interface{}) {}
+	}
+	if ticker == nil {
+		ticker = func(ctx interface{}) (keepopen bool) { return true }
+	}
 	if strings.HasSuffix(net, "-compat") {
 		net = net[:len(net)-len("-compat")]
 	} else {
@@ -32,22 +44,6 @@ func compatServe(net_, addr string,
 	closed func(id int, err error, ctx interface{}),
 	ticker func(ctx interface{}) (keepopen bool),
 	ctx interface{}) error {
-	if handle == nil {
-		handle = func(id int, data []byte, ctx interface{}) (send []byte, keepopen bool) {
-			return nil, true
-		}
-	}
-	if accept == nil {
-		accept = func(id int, addr string, wake func(), ctx interface{}) (send []byte, keepopen bool) {
-			return nil, true
-		}
-	}
-	if closed == nil {
-		closed = func(id int, err error, ctx interface{}) {}
-	}
-	if ticker == nil {
-		ticker = func(ctx interface{}) (keepopen bool) { return true }
-	}
 
 	ln, err := net.Listen(net_, addr)
 	if err != nil {
