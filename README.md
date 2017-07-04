@@ -40,8 +40,15 @@ func Serve(net, addr string,
     accept func(id int, addr string, wake func(), ctx interface{}) (send []byte, keepopen bool),
     closed func(id int, err error, ctx interface{}),
     ticker func(ctx interface{}) (keepserving bool),
-    context interface{}) error
+    ctx interface{}) error
 ```
+
+- All events are executed in the same thread as the `Serve` call.
+- `handle`, `accept`, and `closed` events have an `id` param which is a unique number assigned to the client socket.  
+- `data` represents a network packet.  
+- `ctx` is a user-defined context or nil.  
+- `wake` is a function that when called will trigger the `handle` event with zero data for the specified `id`. It can be called safely from other Goroutines.
+- `ticker` is an event that fires between 1 and 1/20 of a second, depending on the packet traffic.
 
 ## Example
 
