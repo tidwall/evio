@@ -1,13 +1,13 @@
 # `✨ shiny ✨`
 
-Shiny is an alternative networking framework for Go that uses I/O multiplexing.
+Shiny is an alternative server framework for Go that uses I/O multiplexing.
 It makes direct [epoll](https://en.wikipedia.org/wiki/Epoll) and [kqueue](https://en.wikipedia.org/wiki/Kqueue) syscalls rather than the standard Go [net](https://golang.org/pkg/net/) package.
 
-This is similar to the way that [libuv](https://github.com/libuv/libuv), [libevent](https://github.com/libevent/libevent), [haproxy](http://www.haproxy.org/), [nginx](http://nginx.org/), [redis](http://redis.io/), and other high performance network servers work.
+This is similar to the way that [libuv](https://github.com/libuv/libuv), [libevent](https://github.com/libevent/libevent), [haproxy](http://www.haproxy.org/), [nginx](http://nginx.org/), [redis](http://redis.io/), and other high performance servers work.
 
-The reason for this project is that I want to upgrade the networking for [Tile38](http://github.com/tidwall/tile38) so that it will perform on par with Redis, but without having to interop with Cgo. Early benchmarks are exceeding my expectations.
+The goal of this project is to create a simple server framework for Go that performs on par with Redis and Haproxy for packet handling, but without having to interop with Cgo. My hope is to use this as a foundation for [Tile38](http://github.com/tidwall/tile38) and other projects. Early benchmarks are exceeding my expectations.
 
-**This project is a (sweet) work in progress. The API will likely change between now and Tile38 v2.0 release.**
+**This project is a work in progress. The API will likely change between now and Tile38 v2.0 release.**
 
 
 ## Features
@@ -115,7 +115,7 @@ func ticker(ctx interface{}) (keepserving bool) {
 		fmt.Printf("echo server started on port %d\n", port)
 		started = true
 	}
-	// perform various non-socket-io related operation here
+	// perform various non-socket io related operations here
 	return true
 }
 ```
@@ -131,7 +131,6 @@ Connect to the server:
 ```
 $ telnet localhost 9999
 ```
-
 
 ## Performance
 
