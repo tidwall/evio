@@ -3,7 +3,7 @@
 ## redis-server
 
 ```
-go run examples/redis-server.go [--port int] [--appendonly yes/no]
+go run examples/redis-server/main.go [--port int] [--appendonly yes/no]
 ```
 
 - `GET`, `SET`, `DEL`, `QUIT`, `PING`, `SHUTDOWN` commands.  
@@ -14,5 +14,5 @@ go run examples/redis-server.go [--port int] [--appendonly yes/no]
 ## echo-server
 
 ```
-go run examples/echo-server.go [--port int]
+go run examples/echo-server/main.go [--port int]
 ```

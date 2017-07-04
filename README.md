@@ -55,7 +55,7 @@ func Serve(net, addr string,
 
 ## Example
 
-Please check out the [examples](examples) subdirectory for a simplified [redis](examples/redis-server.go) clone and an [echo](examples/echo-server.go) server.
+Please check out the [examples](examples) subdirectory for a simplified [redis](examples/redis-server/main.go) clone and an [echo](examples/echo-server/main.go) server.
 
 Here's a basic echo server:
 
@@ -133,7 +133,7 @@ func ticker(ctx interface{}) (keepserving bool) {
 Run the example:
 
 ```
-$ go run examples/echo-server.go
+$ go run examples/echo-server/main.go
 ```
 
 Connect to the server:
@@ -162,7 +162,7 @@ GET: 1369863.00 requests per second
 **Shiny**
 
 ```
-$ go run examples/redis-server.go --port 6380 --appendonly no
+$ go run examples/redis-server/main.go --port 6380 --appendonly no
 ```
 ```
 redis-benchmark -p 6380 -t ping,set,get -q -P 128
