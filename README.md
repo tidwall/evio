@@ -4,9 +4,9 @@
 [![GoDoc](https://img.shields.io/badge/api-reference-blue.svg?style=flat-square)](https://godoc.org/github.com/tidwall/shiny)
 
 Shiny is an alternative server framework for Go that uses I/O multiplexing.
-It makes direct [epoll](https://en.wikipedia.org/wiki/Epoll) and [kqueue](https://en.wikipedia.org/wiki/Kqueue) syscalls rather than the standard Go [net](https://golang.org/pkg/net/) package.
+It makes direct [epoll](https://en.wikipedia.org/wiki/Epoll) and [kqueue](https://en.wikipedia.org/wiki/Kqueue) syscalls rather than the standard Go [net](https://golang.org/pkg/net/) package. 
 
-This is similar to the way that [libuv](https://github.com/libuv/libuv), [libevent](https://github.com/libevent/libevent), [haproxy](http://www.haproxy.org/), [nginx](http://nginx.org/), [redis](http://redis.io/), and other high performance servers work.
+It uses the [Reactor](https://en.wikipedia.org/wiki/Reactor_pattern) pattern where the server waits for the OS to signal a readiness event. This is similar to the way that [libuv](https://github.com/libuv/libuv), [libevent](https://github.com/libevent/libevent), [haproxy](http://www.haproxy.org/), [nginx](http://nginx.org/), [redis](http://redis.io/), and other high performance servers work. 
 
 The goal of this project is to create a simple server framework for Go that performs on par with Redis and Haproxy for packet handling, but without having to interop with Cgo. My hope is to use this as a foundation for [Tile38](http://github.com/tidwall/tile38) and other projects. Early benchmarks are exceeding my expectations.
 
