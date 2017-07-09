@@ -84,20 +84,21 @@ func eventServe(net_, addr string,
 	var wakeable = true
 	var wakers = make(map[int]int) // FD->ID map
 	var wakersarr []int
-	defer func() {
-		wakemu.Lock()
-		wakeable = false
-		wakemu.Unlock()
-	}()
-	ev = []syscall.Kevent_t{{
-		Ident:  0,
-		Flags:  syscall.EV_ADD,
-		Filter: syscall.EVFILT_USER,
-	}}
-	if _, err := syscall.Kevent(q, ev, nil, nil); err != nil {
-		return err
+	if accept != nil {
+		defer func() {
+			wakemu.Lock()
+			wakeable = false
+			wakemu.Unlock()
+		}()
+		ev = []syscall.Kevent_t{{
+			Ident:  0,
+			Flags:  syscall.EV_ADD,
+			Filter: syscall.EVFILT_USER,
+		}}
+		if _, err := syscall.Kevent(q, ev, nil, nil); err != nil {
+			return err
+		}
 	}
-
 	shandle := func(c *conn, data []byte) {
 		send, keepalive := handle(c.id, data, ctx)
 		if len(send) > 0 {
@@ -182,31 +183,33 @@ func eventServe(net_, addr string,
 				addr = string(strconv.AppendInt(res, int64(port), 10))
 
 				id++
-				wake := func(nfd, id int) func() {
-					return func() {
-						// NOTE: This is the one and only entrypoint that is
-						// not thread-safe. Use a mutex.
-						wakemu.Lock()
-						ev := []syscall.Kevent_t{{
-							Ident:  0,
-							Flags:  syscall.EV_ENABLE,
-							Filter: syscall.EVFILT_USER,
-							Fflags: syscall.NOTE_TRIGGER,
-						}}
-						if wakeable {
-							wakers[nfd] = id
-							syscall.Kevent(q, ev, nil, nil)
+				var send []byte
+				if accept != nil {
+					wake := func(nfd, id int) func() {
+						return func() {
+							// NOTE: This is the one and only entrypoint that is
+							// not thread-safe. Use a mutex.
+							wakemu.Lock()
+							ev := []syscall.Kevent_t{{
+								Ident:  0,
+								Flags:  syscall.EV_ENABLE,
+								Filter: syscall.EVFILT_USER,
+								Fflags: syscall.NOTE_TRIGGER,
+							}}
+							if wakeable {
+								wakers[nfd] = id
+								syscall.Kevent(q, ev, nil, nil)
+							}
+							wakemu.Unlock()
 						}
-						wakemu.Unlock()
+					}(nfd, id)
+					var keepalive bool
+					send, keepalive = accept(id, addr, wake, ctx)
+					if !keepalive {
+						syscall.Close(nfd)
+						continue
 					}
-				}(nfd, id)
-
-				send, keepalive := accept(id, addr, wake, ctx)
-				if !keepalive {
-					syscall.Close(nfd)
-					continue
 				}
-
 				// 500 second keepalive
 				var kerr1, kerr2, kerr3 error
 				if runtime.GOOS == "darwin" {
