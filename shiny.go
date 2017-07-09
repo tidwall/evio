@@ -18,9 +18,6 @@ func Serve(net, addr string,
 	if handle == nil {
 		handle = func(id int, data []byte, ctx interface{}) (send []byte, keepopen bool) { return nil, true }
 	}
-	if accept == nil {
-		accept = func(id int, addr string, wake func(), ctx interface{}) (send []byte, keepopen bool) { return nil, true }
-	}
 	if closed == nil {
 		closed = func(id int, err error, ctx interface{}) {}
 	}

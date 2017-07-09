@@ -89,34 +89,41 @@ func eventServe(net_, addr string,
 	}
 
 	// add wake event
+	var efd int
 	var wakemu sync.Mutex
 	var wakeable = true
 	var wakers = make(map[int]int) // FD->ID map
 	var wakersarr []int
 	var wakezero = []byte{0, 1, 2, 3, 4, 5, 6, 7}
-	// SYS_EVENTFD is not implemented in Go yet.
-	// SYS_EVENTFD                = 284
-	// SYS_EVENTFD2               = 290
-	r1, _, errn := syscall.Syscall(284, 0, 0, 0)
-	if errn != 0 {
-		return errn
+	if accept != nil {
+		// SYS_EVENTFD is not implemented in Go yet.
+		// SYS_EVENTFD                = 284
+		// SYS_EVENTFD2               = 290
+		r1, _, errn := syscall.Syscall(284, 0, 0, 0)
+		if errn != 0 {
+			if errn.Error() == "socket operation on non-socket" {
+				// could this be an arm CPU?
+			} else {
+				return errn
+			}
+		}
+		var efd = int(r1)
+		defer func() {
+			wakemu.Lock()
+			wakeable = false
+			syscall.Close(efd)
+			wakemu.Unlock()
+		}()
+		if efd != 0 {
+			event = syscall.EpollEvent{
+				Fd:     int32(efd),
+				Events: syscall.EPOLLIN,
+			}
+			if err := syscall.EpollCtl(q, syscall.EPOLL_CTL_ADD, efd, &event); err != nil {
+				return err
+			}
+		}
 	}
-	var efd = int(r1)
-	defer func() {
-		wakemu.Lock()
-		wakeable = false
-		syscall.Close(efd)
-		wakemu.Unlock()
-	}()
-
-	event = syscall.EpollEvent{
-		Fd:     int32(efd),
-		Events: syscall.EPOLLIN,
-	}
-	if err := syscall.EpollCtl(q, syscall.EPOLL_CTL_ADD, efd, &event); err != nil {
-		return err
-	}
-
 	shandle := func(c *conn, data []byte) {
 		send, keepalive := handle(c.id, data, ctx)
 		if len(send) > 0 {
@@ -194,25 +201,27 @@ func eventServe(net_, addr string,
 				addr = string(strconv.AppendInt(res, int64(port), 10))
 
 				id++
-				wake := func(nfd, id int) func() {
-					return func() {
-						// NOTE: This is the one and only entrypoint that is
-						// not thread-safe. Use a mutex.
-						wakemu.Lock()
-						if wakeable {
-							wakers[nfd] = id
-							syscall.Write(efd, wakezero[:])
+				var send []byte
+				if accept != nil {
+					wake := func(nfd, id int) func() {
+						return func() {
+							// NOTE: This is the one and only entrypoint that is
+							// not thread-safe. Use a mutex.
+							wakemu.Lock()
+							if wakeable {
+								wakers[nfd] = id
+								syscall.Write(efd, wakezero[:])
+							}
+							wakemu.Unlock()
 						}
-						wakemu.Unlock()
+					}(nfd, id)
+					var keepalive bool
+					send, keepalive = accept(id, addr, wake, ctx)
+					if !keepalive {
+						syscall.Close(nfd)
+						continue
 					}
-				}(nfd, id)
-
-				send, keepalive := accept(id, addr, wake, ctx)
-				if !keepalive {
-					syscall.Close(nfd)
-					continue
 				}
-
 				// 500 second keepalive
 				kerr1 := syscall.SetsockoptInt(nfd, syscall.SOL_SOCKET, syscall.SO_KEEPALIVE, 1)
 				kerr2 := syscall.SetsockoptInt(nfd, syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, 500)
