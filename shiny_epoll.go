@@ -146,12 +146,10 @@ func eventServe(net_, addr string,
 	}
 
 	var id int
-	var ts = 1000
 	var packet [65535]byte
 	var evs [32]syscall.EpollEvent
 	for {
-		var ts int
-		n, err := syscall.EpollWait(q, evs[:], ts)
+		n, err := syscall.EpollWait(q, evs[:], 1000)
 		if err != nil {
 			if err == syscall.EINTR {
 				continue
