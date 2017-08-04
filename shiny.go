@@ -66,7 +66,7 @@ func compatServe(net_, addr string,
 	var lastwrite time.Time
 	lasttick := time.Now()
 	go func() {
-		t := time.NewTicker(time.Second / 20)
+		t := time.NewTicker(time.Second / 60)
 		defer t.Stop()
 		for {
 			select {

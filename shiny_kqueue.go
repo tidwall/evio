@@ -62,7 +62,6 @@ func eventServe(net_, addr string,
 		}
 	}()
 
-	var lastwriteorwake time.Time
 	write := func(nfd int, send []byte) (err error) {
 		res1, res2, errn := syscall.Syscall(syscall.SYS_WRITE, uintptr(nfd),
 			uintptr(unsafe.Pointer(&send[0])), uintptr(len(send)))
@@ -75,7 +74,6 @@ func eventServe(net_, addr string,
 			}
 			return errn
 		}
-		lastwriteorwake = time.Now()
 		return nil
 	}
 
@@ -123,15 +121,10 @@ func eventServe(net_, addr string,
 	}
 
 	var id int
+	var ts = syscall.Timespec{Sec: 1, Nsec: 0}
 	var packet [65535]byte
 	var evs [32]syscall.Kevent_t
 	for {
-		var ts syscall.Timespec
-		if time.Since(lastwriteorwake) < time.Second {
-			ts = syscall.Timespec{Sec: 0, Nsec: int64(time.Second / 20)}
-		} else {
-			ts = syscall.Timespec{Sec: 1, Nsec: 0}
-		}
 		n, err := syscall.Kevent(q, nil, evs[:], &ts)
 		if err != nil {
 			if err == syscall.EINTR {
@@ -141,7 +134,7 @@ func eventServe(net_, addr string,
 		}
 		for i := 0; ; i++ {
 			now := time.Now()
-			if now.Sub(lastts) >= time.Second/20 {
+			if now.Sub(lastts) >= time.Second/60 {
 				if !ticker(ctx) {
 					syscall.Close(q)
 					break
@@ -181,7 +174,6 @@ func eventServe(net_, addr string,
 					res = append(append(res, addr...), ':')
 				}
 				addr = string(strconv.AppendInt(res, int64(port), 10))
-
 				id++
 				var send []byte
 				if accept != nil {
@@ -274,7 +266,6 @@ func eventServe(net_, addr string,
 						shandle(c, nil)
 					}
 				}
-				lastwriteorwake = time.Now()
 			} else {
 				c := conns[int(evs[i].Ident)]
 				res, _, errn := syscall.Syscall(syscall.SYS_READ, uintptr(c.fd),

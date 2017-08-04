@@ -71,7 +71,6 @@ func eventServe(net_, addr string,
 		}
 	}()
 
-	var lastwriteorwake time.Time
 	write := func(nfd int, send []byte) (err error) {
 		res1, res2, errn := syscall.Syscall(syscall.SYS_WRITE, uintptr(nfd),
 			uintptr(unsafe.Pointer(&send[0])), uintptr(len(send)))
@@ -84,7 +83,6 @@ func eventServe(net_, addr string,
 			}
 			return errn
 		}
-		lastwriteorwake = time.Now()
 		return nil
 	}
 
@@ -148,15 +146,11 @@ func eventServe(net_, addr string,
 	}
 
 	var id int
+	var ts = 1000
 	var packet [65535]byte
 	var evs [32]syscall.EpollEvent
 	for {
 		var ts int
-		if time.Since(lastwriteorwake) < time.Second {
-			ts = 50
-		} else {
-			ts = 1000
-		}
 		n, err := syscall.EpollWait(q, evs[:], ts)
 		if err != nil {
 			if err == syscall.EINTR {
@@ -166,7 +160,7 @@ func eventServe(net_, addr string,
 		}
 		for i := 0; ; i++ {
 			now := time.Now()
-			if now.Sub(lastts) >= time.Second/20 {
+			if now.Sub(lastts) >= time.Second/60 {
 				if !ticker(ctx) {
 					syscall.Close(q)
 					break
@@ -272,7 +266,6 @@ func eventServe(net_, addr string,
 						shandle(c, nil)
 					}
 				}
-				lastwriteorwake = time.Now()
 			} else if evs[i].Events&syscall.EPOLLRDHUP != 0 {
 				closeAndRemove(conns[int(evs[i].Fd)])
 			} else {

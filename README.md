@@ -51,7 +51,7 @@ func Serve(net, addr string,
 - `data` represents a network packet.  
 - `ctx` is a user-defined context or nil.  
 - `wake` is a function that when called will trigger the `handle` event with zero data for the specified `id`. It can be called safely from other Goroutines.
-- `ticker` is an event that fires between 1 and 1/20 of a second, depending on the packet traffic.
+- `ticker` is an event that fires between 1 and 60 times a second, depending on the packet traffic.
 
 ## Example
 
