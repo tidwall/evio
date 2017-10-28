@@ -40,7 +40,7 @@ There's only one function:
 
 ```go
 // Serve starts handling events for the specified addresses. 
-// Addresses look like `tcp://192.168.0.10:9851` or `unix://socket`.
+// Addresses should be formatted like `tcp://192.168.0.10:9851` or `unix://socket`.
 func Serve(events Events, addr ...string) error
 ```
 
@@ -93,105 +93,39 @@ type Events struct {
 - The `Action` return value allows for closing or detaching a connection, or shutting down the server.
 
 
-# Simple Echo Server
+## Example - Simple echo server
 
 ```
-func main(){
-    evio.Serve(events, "tcp://0.0.0.0:9851", "unix://
-}
-```
-
-
-
-
-
-## Example
-
-Please check out the [examples](examples) subdirectory for a simplified [redis](examples/redis-server/main.go) clone and an [echo](examples/echo-server/main.go) server.
-
-Here's a basic echo server:
-
-```go
 package main
 
-import (
-	"flag"
-	"fmt"
-	"log"
-
-	"github.com/tidwall/shiny"
-)
-
-var shutdown bool
-var started bool
-var port int
+import "github.com/tidwall/evio"
 
 func main() {
-	flag.IntVar(&port, "port", 9999, "server port")
-	flag.Parse()
-	log.Fatal(shiny.Serve("tcp", fmt.Sprintf(":%d", port),
-		handle, accept, closed, ticker, nil))
-}
-
-// handle - the incoming client socket data.
-func handle(id int, data []byte, ctx interface{}) (send []byte, keepopen bool) {
-	if shutdown {
-		return nil, false
+	var events evio.Events
+	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
+		out = in
+		return
 	}
-	keepopen = true
-	if string(data) == "shutdown\r\n" {
-		shutdown = true
-	} else if string(data) == "quit\r\n" {
-		keepopen = false
+	if err := evio.Serve(events, "tcp://localhost:5000"); err != nil {
+		println(err.Error())
 	}
-	return data, keepopen
 }
-
-// accept - a new client socket has opened.
-// 'wake' is a function that when called will fire a 'handle' event
-// for the specified ID, and is goroutine-safe.
-func accept(id int, addr string, wake func(), ctx interface{}) (send []byte, keepopen bool) {
-	if shutdown {
-		return nil, false
-	}
-	// this is a good place to create a user-defined socket context.
-	return []byte(
-		"Welcome to the echo server!\n" +
-			"Enter 'quit' to close your connection or " +
-			"'shutdown' to close the server.\n"), true
-}
-
-// closed - a client socket has closed
-func closed(id int, err error, ctx interface{}) {
-	// teardown the socket context here
-}
-
-// ticker - a ticker that fires between 1 and 1/20 of a second
-// depending on the traffic.
-func ticker(ctx interface{}) (keepserving bool) {
-	if shutdown {
-		// do server teardown here
-		return false
-	}
-	if !started {
-		fmt.Printf("echo server started on port %d\n", port)
-		started = true
-	}
-	// perform various non-socket io related operations here
-	return true
-}
-```
-
-Run the example:
-
-```
-$ go run examples/echo-server/main.go
 ```
 
 Connect to the server:
 
 ```
-$ telnet localhost 9999
+$ telnet localhost 5000
+```
+
+## More examples
+
+Please check out the [examples](examples) subdirectory for a simplified [redis](examples/redis-server/main.go) clone, an [echo](examples/echo-server/main.go) server, and a basic [http](examples/http-server/main.go) server.
+
+To run an example:
+
+```bash
+$ go run examples/http-server/main.go
 ```
 
 ## Performance
@@ -232,5 +166,5 @@ Josh Baker [@tidwall](http://twitter.com/tidwall)
 
 ## License
 
-Shiny source code is available under the MIT [License](/LICENSE).
+`evio` source code is available under the MIT [License](/LICENSE).
 
