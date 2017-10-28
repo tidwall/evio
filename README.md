@@ -1,16 +1,17 @@
-# `✨ shiny ✨`
+<p align="center">
+<img 
+    src="logo.png" 
+    width="483" height="150" border="0" alt="evio">
+<br>
+<a href="https://travis-ci.org/tidwall/evio"><img src="https://img.shields.io/travis/tidwall/evio.svg?style=flat-square" alt="Build Status"></a>
+<a href="https://godoc.org/github.com/tidwall/evio"><img src="https://img.shields.io/badge/api-reference-blue.svg?style=flat-square" alt="GoDoc"></a>
+</p>
 
-[![Build Status](https://img.shields.io/travis/tidwall/shiny.svg?style=flat-square)](https://travis-ci.org/tidwall/shiny)
-[![GoDoc](https://img.shields.io/badge/api-reference-blue.svg?style=flat-square)](https://godoc.org/github.com/tidwall/shiny)
-
-Shiny is an alternative server framework for Go that uses I/O multiplexing.
-It makes direct [epoll](https://en.wikipedia.org/wiki/Epoll) and [kqueue](https://en.wikipedia.org/wiki/Kqueue) syscalls rather than the standard Go [net](https://golang.org/pkg/net/) package. 
-
-It uses the [Reactor](https://en.wikipedia.org/wiki/Reactor_pattern) pattern where the server waits for the OS to signal a readiness event. This is similar to the way that [libuv](https://github.com/libuv/libuv), [libevent](https://github.com/libevent/libevent), [haproxy](http://www.haproxy.org/), [nginx](http://nginx.org/), [redis](http://redis.io/), and other high performance servers work. 
-
-The goal of this project is to create a simple server framework for Go that performs on par with Redis and Haproxy for packet handling, but without having to interop with Cgo. My hope is to use this as a foundation for [Tile38](http://github.com/tidwall/tile38) and other projects. Early benchmarks are exceeding my expectations.
-
-**This project is a work in progress. The API will likely change between now and Tile38 v2.0 release.**
+BuntDB is a low-level, in-memory, key/value store in pure Go. 
+It persists to disk, is ACID compliant, and uses locking for multiple
+readers and a single writer. It supports custom indexes and geospatial 
+data. It's ideal for projects that need a dependable database and favor 
+speed over data size.
 
 
 ## Features
