@@ -63,6 +63,7 @@ type Events struct {
 }
 
 // Serve starts handling events for the specified addresses.
+// Addresses should be formatted like `tcp://192.168.0.10:9851` or `unix://socket`.
 func Serve(events Events, addr ...string) error {
 	if len(addr) == 0 {
 		return errors.New("nothing to serve")
