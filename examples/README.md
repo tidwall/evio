@@ -22,10 +22,7 @@ Runs on port 8080
 go run examples/http-server/main.go
 ```
 
-```
-curl http://localhost:8080/
-```
-
+Browse to http://localhost:8080.
 All requests print `Hello World!`.
 
 ## redis-server
