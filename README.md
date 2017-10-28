@@ -8,17 +8,19 @@
 </p>
 <p align="center">Event Networking for Go</a></p>
 
-`evio` is an event driven networking framework that is fast and small. It makes direct [epoll](https://en.wikipedia.org/wiki/Epoll) and [kqueue](https://en.wikipedia.org/wiki/Kqueue) syscalls rather than the standard Go [net](https://golang.org/pkg/net/) package. It works in a similar to [libuv](https://github.com/libuv/libuv) and [libevent](https://github.com/libevent/libevent).
+`evio` is an event driven networking framework that is fast and small. It makes direct [epoll](https://en.wikipedia.org/wiki/Epoll) and [kqueue](https://en.wikipedia.org/wiki/Kqueue) syscalls rather than the standard Go [net](https://golang.org/pkg/net/) package. It works in a similar manner as [libuv](https://github.com/libuv/libuv) and [libevent](https://github.com/libevent/libevent).
 
 The goal of this project is to create a server framework for Go that performs on par with [Redis](http://redis.io) and [Haproxy](http://www.haproxy.org) for packet handling, but without having to interop with Cgo. My hope is to use this as a foundation for [Tile38](https://github.com/tidwall/tile38) and other projects.
 
 ## Features
 
-- Simple API. Only one entrypoint and four event functions
+- Very fast single-threaded design
+- Simple API. Only one entrypoint and eight events
 - Low memory usage
-- Very fast single-threaded support
+- Supports tcp4, tcp6, and unix sockets
+- Allows multiple network binding on the same event loop
+- Has a flexible ticker event
 - Support for non-epoll/kqueue operating systems by simulating events with the net package.
-
 
 ## Getting Started
 
@@ -34,16 +36,47 @@ This will retrieve the library.
 
 ### Usage
 
-There's only the one function:
+There's only one function:
 
 ```go
-func Serve(net, addr string,
-    handle func(id int, data []byte, ctx interface{}) (send []byte, keepopen bool),
-    accept func(id int, addr string, wake func(), ctx interface{}) (send []byte, keepopen bool),
-    closed func(id int, err error, ctx interface{}),
-    ticker func(ctx interface{}) (keepserving bool),
-    ctx interface{}) error
+func Serve(events Events, addr ...string) error
 ```
+
+The Events type has the following events:
+
+```go
+// Events represents server events
+type Events struct {
+	// Serving fires when the server can accept connections.
+	// The wake parameter is a goroutine-safe function that triggers
+	// a Data event (with a nil `in` parameter) for the specified id.
+	Serving func(wake func(id int) bool) (action Action)
+	// Opened fires when a new connection has opened.
+	// Use the out return value to write data to the connection.
+	Opened func(id int, addr string) (out []byte, opts Options, action Action)
+	// Opened fires when a connection is closed
+	Closed func(id int) (action Action)
+	// Detached fires when a connection has been previously detached.
+	Detached func(id int, conn io.ReadWriteCloser) (action Action)
+	// Data fires when a connection sends the server data.
+	// Use the out return value to write data to the connection.
+	Data func(id int, in []byte) (out []byte, action Action)
+	// Prewrite fires prior to every write attempt.
+	// The amount parameter is the number of bytes that will be attempted
+	// to be written to the connection.
+	Prewrite func(id int, amount int) (action Action)
+	// Postwrite fires immediately after every write attempt.
+	// The amount parameter is the number of bytes that was written to the
+	// connection.
+	// The remaining parameter is the number of bytes that still remain in
+	// the buffer scheduled to be written.
+	Postwrite func(id int, amount, remaining int) (action Action)
+	// Tick fires immediately after the server starts and will fire again
+	// following the duration specified by the delay return value.
+	Tick func() (delay time.Duration, action Action)
+}
+```
+
 
 - All events are executed in the same thread as the `Serve` call.
 - `handle`, `accept`, and `closed` events have an `id` param which is a unique number assigned to the client socket.  
