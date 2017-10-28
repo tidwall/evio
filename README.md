@@ -8,7 +8,7 @@
 </p>
 <p align="center">Event Networking for Go</a></p>
 
-`evio` is an event driven networking framework that is fast and small. It makes direct epoll and kqueue syscalls rather than the standard Go net package. It similar to the [libuv](https://github.com/libuv/libuv) and [libevent](https://github.com/libevent/libevent) libraries.
+`evio` is an event driven networking framework that is fast and small. It makes direct epoll and kqueue syscalls rather than the standard Go net package. It works in a similar to [libuv](https://github.com/libuv/libuv) and [libevent](https://github.com/libevent/libevent).
 
 The goal of this project is to create a server framework for Go that performs on par with [Redis](http://redis.io) and [Haproxy](http://www.haproxy.org) for packet handling, but without having to interop with Cgo. My hope is to use this as a foundation for [Tile38](https://github.com/tidwall/tile38) and other projects.
 
