@@ -34,7 +34,7 @@ type Options struct {
 // Events represents server events
 type Events struct {
 	// Serving fires when the server can accept connections.
-	// The wake parameter is a goroutine-safe function that's triggers
+	// The wake parameter is a goroutine-safe function that triggers
 	// a Data event (with a nil `in` parameter) for the specified id.
 	Serving func(wake func(id int) bool) (action Action)
 	// Opened fires when a new connection has opened.
@@ -81,7 +81,7 @@ func Serve(events Events, addr ...string) error {
 			ln.close()
 		}
 	}()
-	var compat bool
+	var stdlib bool
 	for _, addr := range addr {
 		ln := listener{network: "tcp", addr: addr}
 		if strings.Contains(addr, "://") {
@@ -91,7 +91,7 @@ func Serve(events Events, addr ...string) error {
 			ln.network = "unix"
 		}
 		if strings.HasSuffix(ln.network, "-stdlib") {
-			compat = true
+			stdlib = true
 			ln.network = ln.network[:len(ln.network)-7]
 		}
 		if ln.network == "unix" {
@@ -102,14 +102,14 @@ func Serve(events Events, addr ...string) error {
 		if err != nil {
 			return err
 		}
-		if !compat {
+		if !stdlib {
 			if err := ln.system(); err != nil {
 				return err
 			}
 		}
 		lns = append(lns, &ln)
 	}
-	if compat {
+	if stdlib {
 		return servestdlib(events, lns)
 	}
 	return serve(events, lns)
@@ -125,6 +125,7 @@ type cconn struct {
 	detached bool
 }
 
+// servestdlib uses the stdlib net package instead of syscalls.
 func servestdlib(events Events, lns []*listener) error {
 	type fail struct{ err error }
 	type accept struct{ conn net.Conn }
@@ -325,13 +326,8 @@ again:
 						unlock()
 						action := events.Prewrite(c.id, len(c.outbuf[c.outpos:]))
 						lock()
-						switch action {
-						case Shutdown:
-							c.action = Shutdown
-						case Close:
-							if c.action != Shutdown {
-								c.action = Close
-							}
+						if action > c.action {
+							c.action = action
 						}
 					}
 					c.conn.SetWriteDeadline(time.Now().Add(time.Millisecond))
@@ -344,13 +340,8 @@ again:
 						unlock()
 						action := events.Postwrite(c.id, amount, len(c.outbuf)-c.outpos-amount)
 						lock()
-						switch action {
-						case Shutdown:
-							c.action = Shutdown
-						case Close:
-							if c.action != Shutdown {
-								c.action = Close
-							}
+						if action > c.action {
+							c.action = action
 						}
 					}
 					if err != nil {

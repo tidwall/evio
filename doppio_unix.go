@@ -239,13 +239,8 @@ func serve(events Events, lns []*listener) error {
 					unlock()
 					action := events.Prewrite(c.id, len(c.outbuf[c.outpos:]))
 					lock()
-					switch action {
-					case Shutdown:
+					if action == Shutdown {
 						c.action = Shutdown
-					case Close:
-						if c.action != Shutdown {
-							c.action = Close
-						}
 					}
 				}
 				n, err = syscall.Write(c.fd, c.outbuf[c.outpos:])
@@ -257,13 +252,8 @@ func serve(events Events, lns []*listener) error {
 					unlock()
 					action := events.Postwrite(c.id, amount, len(c.outbuf)-c.outpos-amount)
 					lock()
-					switch action {
-					case Shutdown:
+					if action == Shutdown {
 						c.action = Shutdown
-					case Close:
-						if c.action != Shutdown {
-							c.action = Close
-						}
 					}
 				}
 				if n == 0 || err != nil {

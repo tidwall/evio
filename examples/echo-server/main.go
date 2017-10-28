@@ -1,64 +1,41 @@
 package main
 
 import (
-	"flag"
-	"fmt"
+	"log"
 
-	"github.com/tidwall/shiny"
+	"github.com/tidwall/doppio"
 )
 
 func main() {
-	var port int
-	flag.IntVar(&port, "port", 9999, "server port")
-	flag.Parse()
 
-	var shutdown bool
-	var started bool
-	fmt.Println(shiny.Serve("tcp", fmt.Sprintf(":%d", port),
-		// handle - the incoming client socket data.
-		func(id int, data []byte, ctx interface{}) (send []byte, keepopen bool) {
-			if shutdown {
-				return nil, false
-			}
-			keepopen = true
-			if string(data) == "shutdown\r\n" {
-				shutdown = true
-			} else if string(data) == "quit\r\n" {
-				keepopen = false
-			}
-			return data, keepopen
-		},
-		// accept - a new client socket has opened.
-		// 'wake' is a function that when called will fire a 'handle' event
-		// for the specified ID, and is goroutine-safe.
-		func(id int, addr string, wake func(), ctx interface{}) (send []byte, keepopen bool) {
-			if shutdown {
-				return nil, false
-			}
-			// this is a good place to create a user-defined socket context.
-			return []byte(
-				"Welcome to the echo server!\n" +
-					"Enter 'quit' to close your connection or " +
-					"'shutdown' to close the server.\n"), true
-		},
-		// closed - a client socket has closed
-		func(id int, err error, ctx interface{}) {
-			// teardown the socket context here
-		},
-		// ticker - a ticker that fires between 1 and 1/20 of a second
-		// depending on the traffic.
-		func(ctx interface{}) (keepserveropen bool) {
-			if shutdown {
-				// do server teardown here
-				return false
-			}
-			if !started {
-				fmt.Printf("echo server started on port %d\n", port)
-				started = true
-			}
-			// perform various non-socket-io related operation here
-			return true
-		},
-		// an optional user-defined context
-		nil))
+	var events doppio.Events
+
+	// Serving fires when the server can accept connections.
+	events.Serving = func(wake func(id int) bool) (action doppio.Action) {
+		log.Print("echo server started on port 5000")
+		return
+	}
+
+	// // Accept a new client connection for the specified ID.
+	// events.Opened = func(id int, addr string) (out []byte, opts doppio.Options, action doppio.Action) {
+	// 	// This is a good place to create a user-defined connection context.
+	// 	out = []byte("Welcome to the echo server!\r\n" +
+	// 		"Enter 'quit' to close your connection or " +
+	// 		"'shutdown' to close the server.\r\n")
+	// 	return
+	// }
+
+	// Handle incoming data.
+	events.Data = func(id int, in []byte) (out []byte, action doppio.Action) {
+		out = in
+		// if string(in) == "shutdown\r\n" {
+		// 	action = doppio.Shutdown
+		// } else if string(in) == "quit\r\n" {
+		// 	action = doppio.Close
+		// }
+		// out = in
+		return
+	}
+
+	log.Fatal(doppio.Serve(events, "tcp://0.0.0.0:5000", "unix://socket"))
 }
