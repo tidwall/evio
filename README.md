@@ -5,16 +5,8 @@
 <br>
 <a href="https://travis-ci.org/tidwall/evio"><img src="https://img.shields.io/travis/tidwall/evio.svg?style=flat-square" alt="Build Status"></a>
 <a href="https://godoc.org/github.com/tidwall/evio"><img src="https://img.shields.io/badge/api-reference-blue.svg?style=flat-square" alt="GoDoc"></a>
-<br>
-Event Loop Networking for Go
 </p>
-
-BuntDB is a low-level, in-memory, key/value store in pure Go. 
-It persists to disk, is ACID compliant, and uses locking for multiple
-readers and a single writer. It supports custom indexes and geospatial 
-data. It's ideal for projects that need a dependable database and favor 
-speed over data size.
-
+<p align="center">Event Loop Networking for Go</a></p>
 
 ## Features
 
@@ -28,10 +20,10 @@ speed over data size.
 
 ### Installing
 
-To start using Shiny, install Go and run `go get`:
+To start using evio, install Go and run `go get`:
 
 ```sh
-$ go get -u github.com/tidwall/shiny
+$ go get -u github.com/tidwall/evio
 ```
 
 This will retrieve the library.
