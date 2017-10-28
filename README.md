@@ -39,10 +39,12 @@ This will retrieve the library.
 There's only one function:
 
 ```go
+// Serve starts handling events for the specified addresses. 
+// Addresses look like `tcp://192.168.0.10:9851` or `unix://socket`.
 func Serve(events Events, addr ...string) error
 ```
 
-The Events type has the following events:
+The Events type is defined as:
 
 ```go
 // Events represents server events
@@ -51,39 +53,57 @@ type Events struct {
 	// The wake parameter is a goroutine-safe function that triggers
 	// a Data event (with a nil `in` parameter) for the specified id.
 	Serving func(wake func(id int) bool) (action Action)
+
 	// Opened fires when a new connection has opened.
 	// Use the out return value to write data to the connection.
 	Opened func(id int, addr string) (out []byte, opts Options, action Action)
+
 	// Opened fires when a connection is closed
 	Closed func(id int) (action Action)
+
 	// Detached fires when a connection has been previously detached.
 	Detached func(id int, conn io.ReadWriteCloser) (action Action)
+
 	// Data fires when a connection sends the server data.
 	// Use the out return value to write data to the connection.
 	Data func(id int, in []byte) (out []byte, action Action)
+	
 	// Prewrite fires prior to every write attempt.
 	// The amount parameter is the number of bytes that will be attempted
 	// to be written to the connection.
 	Prewrite func(id int, amount int) (action Action)
+	
 	// Postwrite fires immediately after every write attempt.
 	// The amount parameter is the number of bytes that was written to the
 	// connection.
 	// The remaining parameter is the number of bytes that still remain in
 	// the buffer scheduled to be written.
 	Postwrite func(id int, amount, remaining int) (action Action)
+	
 	// Tick fires immediately after the server starts and will fire again
 	// following the duration specified by the delay return value.
 	Tick func() (delay time.Duration, action Action)
 }
 ```
 
-
 - All events are executed in the same thread as the `Serve` call.
-- `handle`, `accept`, and `closed` events have an `id` param which is a unique number assigned to the client socket.  
-- `data` represents a network packet.  
-- `ctx` is a user-defined context or nil.  
-- `wake` is a function that when called will trigger the `handle` event with zero data for the specified `id`. It can be called safely from other Goroutines.
-- `ticker` is an event that fires between 1 and 60 times a second, depending on the packet traffic.
+- The `wake` function is there to wake up the event loop from a background goroutine. This is useful for when you need to perform a long-running operation that needs to send data back to a client after the operation is completed, but without blocking the server.
+- `Data`, `Opened`, `Closed`, `Prewrite`, and `Postwrite` events have an `id` param which is a unique number assigned to the client socket.
+- `in` represents an input network packet from a client, and `out` is output data sent to the client.
+- The `Action` return value allows for closing or detaching a connection, or shutting down the server.
+
+
+# Simple Echo Server
+
+```
+func main(){
+    evio.Serve(events, "tcp://0.0.0.0:9851", "unix://
+}
+```
+
+
+
+
 
 ## Example
 
