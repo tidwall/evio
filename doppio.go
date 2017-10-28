@@ -36,7 +36,7 @@ type Events struct {
 	// Serving fires when the server can accept connections.
 	// The wake parameter is a goroutine-safe function that triggers
 	// a Data event (with a nil `in` parameter) for the specified id.
-	Serving func(wake func(id int, out []byte) bool) (action Action)
+	Serving func(wake func(id int) bool) (action Action)
 	// Opened fires when a new connection has opened.
 	// Use the out return value to write data to the connection.
 	Opened func(id int, addr string) (out []byte, opts Options, action Action)
@@ -60,14 +60,6 @@ type Events struct {
 	// Tick fires immediately after the server starts and will fire again
 	// following the duration specified by the delay return value.
 	Tick func() (delay time.Duration, action Action)
-}
-
-type listener struct {
-	ln      net.Listener
-	f       *os.File
-	fd      int
-	network string
-	addr    string
 }
 
 // Serve starts handling events for the specified addresses.
@@ -115,18 +107,54 @@ func Serve(events Events, addr ...string) error {
 	return serve(events, lns)
 }
 
-type cconn struct {
-	id       int
-	conn     net.Conn
-	outbuf   []byte
-	outpos   int
-	action   Action
-	wake     bool
-	detached bool
+// InputStream is a helper type for managing input streams inside the
+// Data event.
+type InputStream struct{ b []byte }
+
+// Begin accepts a new packet and returns a working sequence of
+// unprocessed bytes.
+func (is *InputStream) Begin(packet []byte) (data []byte) {
+	if is == nil {
+		return packet
+	}
+	data = packet
+	if len(is.b) > 0 {
+		is.b = append(is.b, data...)
+		data = is.b
+	}
+	return data
+}
+
+// End shift the stream to match the unprocessed data.
+func (is *InputStream) End(data []byte) {
+	if len(data) > 0 {
+		if len(data) != len(is.b) {
+			is.b = append(is.b[:0], data...)
+		}
+	} else if len(is.b) > 0 {
+		is.b = is.b[:0]
+	}
+}
+
+type listener struct {
+	ln      net.Listener
+	f       *os.File
+	fd      int
+	network string
+	addr    string
 }
 
 // servestdlib uses the stdlib net package instead of syscalls.
 func servestdlib(events Events, lns []*listener) error {
+	type cconn struct {
+		id       int
+		conn     net.Conn
+		outbuf   []byte
+		outpos   int
+		action   Action
+		wake     bool
+		detached bool
+	}
 	type fail struct{ err error }
 	type accept struct{ conn net.Conn }
 	type read struct {
@@ -180,7 +208,7 @@ func servestdlib(events Events, lns []*listener) error {
 	var id int
 	var connconn = make(map[net.Conn]*cconn)
 	var idconn = make(map[int]*cconn)
-	wake := func(id int, out []byte) bool {
+	wake := func(id int) bool {
 		var ok = true
 		var err error
 		lock()
@@ -227,7 +255,6 @@ func servestdlib(events Events, lns []*listener) error {
 		}
 		unlock()
 	}()
-
 	var tickerDelay time.Duration
 	if events.Tick != nil {
 		go func() {
@@ -240,7 +267,6 @@ func servestdlib(events Events, lns []*listener) error {
 			}
 		}()
 	}
-
 	lock()
 again:
 	for {

@@ -11,13 +11,15 @@ import (
 )
 
 type request struct {
-	method, path, proto string
-	head, body          string
+	proto, method string
+	path, query   string
+	head, body    string
+	remoteAddr    string
 }
 
 type conn struct {
 	addr string
-	in   []byte
+	is   doppio.InputStream
 }
 
 func main() {
@@ -29,14 +31,12 @@ func main() {
 		return
 	}
 
-	// Accept a new client connection for the specified ID.
 	events.Opened = func(id int, addr string) (out []byte, opts doppio.Options, action doppio.Action) {
 		conns[id] = &conn{addr: addr}
 		log.Printf("%s: opened", addr)
 		return
 	}
 
-	// Free resources after a connection closes
 	events.Closed = func(id int) (action doppio.Action) {
 		c := conns[id]
 		log.Printf("%s: closed", c.addr)
@@ -44,19 +44,16 @@ func main() {
 		return
 	}
 
-	// Deal with incoming data
 	events.Data = func(id int, in []byte) (out []byte, action doppio.Action) {
 		c := conns[id]
-		data := in
-		if len(c.in) > 0 {
-			data = append(c.in, data...)
-		}
+		data := c.is.Begin(in)
+		// process the pipeline
 		var req request
 		for {
 			leftover, err := parsereq(data, &req)
 			if err != nil {
 				// bad thing happened
-				out = appendresp(out, &req, "500 Error", "", err.Error()+"\n")
+				out = appendresp(out, "500 Error", "", err.Error()+"\n")
 				action = doppio.Close
 				break
 			} else if len(leftover) == len(data) {
@@ -64,26 +61,27 @@ func main() {
 				break
 			}
 			// handle the request
-			out = appendhandle(out, &req, c.addr)
+			req.remoteAddr = c.addr
+			out = appendhandle(out, &req)
 			data = leftover
 		}
-		if len(data) > 0 {
-			c.in = append(c.in[:0], data...)
-		} else if len(c.in) > 0 {
-			c.in = c.in[:0]
-		}
+		c.is.End(data)
 		return
 	}
 
-	// Connect to port 8080
 	log.Fatal(doppio.Serve(events, "tcp://0.0.0.0:8080"))
 }
 
-func appendhandle(b []byte, req *request, addr string) []byte {
-	return appendresp(b, req, "200 OK", "", "Hello World!\n")
+// appendhandle handles the incoming request and appends the response to
+// the provided bytes, which is then returned to the caller.
+func appendhandle(b []byte, req *request) []byte {
+	return appendresp(b, "200 OK", "", "Hello World!\n")
 }
 
-func appendresp(b []byte, req *request, status, head, body string) []byte {
+// appendresp will append a valid http response to the provide bytes.
+// The status param should be the code plus text such as "200 OK".
+// The head parameter should be a series of lines ending with "\r\n" or empty.
+func appendresp(b []byte, status, head, body string) []byte {
 	b = append(b, "HTTP/1.1"...)
 	b = append(b, ' ')
 	b = append(b, status...)
@@ -104,6 +102,9 @@ func appendresp(b []byte, req *request, status, head, body string) []byte {
 	return b
 }
 
+// parsereq is a very simple http request parser. This operation
+// waits for the entire payload to be buffered before returning a
+// valid request.
 func parsereq(data []byte, req *request) (leftover []byte, err error) {
 	var s int
 	var n int
@@ -123,6 +124,13 @@ func parsereq(data []byte, req *request) (leftover []byte, err error) {
 				req.method = parts[0]
 				req.path = parts[1]
 				req.proto = parts[2]
+				for i := 0; i < len(req.path); i++ {
+					if req.path[i] == '?' {
+						req.query = req.path[i+1:]
+						req.path = req.path[:i]
+						break
+					}
+				}
 			} else if line == "" {
 				req.head = string(data[len(top)+2 : i+1])
 				i++

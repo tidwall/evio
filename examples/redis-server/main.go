@@ -8,8 +8,13 @@ import (
 	"github.com/tidwall/redcon"
 )
 
+type conn struct {
+	is   doppio.InputStream
+	addr string
+}
+
 func main() {
-	var conns = make(map[int][]byte)
+	var conns = make(map[int]*conn)
 	var keys = make(map[string]string)
 	var events doppio.Events
 	events.Serving = func(wake func(id int) bool) (action doppio.Action) {
@@ -17,17 +22,17 @@ func main() {
 		log.Printf("serving on unix socket")
 		return
 	}
+	events.Opened = func(id int, addr string) (out []byte, opts doppio.Options, action doppio.Action) {
+		conns[id] = &conn{}
+		return
+	}
 	events.Closed = func(id int) (action doppio.Action) {
 		delete(conns, id)
 		return
 	}
 	events.Data = func(id int, in []byte) (out []byte, action doppio.Action) {
-		buf := conns[id]
-		data := in
-		if len(buf) > 0 {
-			buf = append(buf, data...)
-			data = buf
-		}
+		c := conns[id]
+		data := c.is.Begin(in)
 		var n int
 		var complete bool
 		var err error
@@ -86,14 +91,13 @@ func main() {
 						}
 						out = redcon.AppendInt(out, int64(n))
 					}
+				case "FLUSHDB":
+					keys = make(map[string]string)
+					out = redcon.AppendString(out, "OK")
 				}
 			}
 		}
-		if len(data) > 0 {
-			conns[id] = append(buf[:0], data...)
-		} else if len(buf) > 0 {
-			conns[id] = buf[:0]
-		}
+		c.is.End(data)
 		return
 	}
 	err := doppio.Serve(events, "tcp://0.0.0.0:6380", "unix://socket")

@@ -1,4 +1,4 @@
-// +build darwin linux
+// +build netbsd openbsd freebsd darwin dragonfly linux
 
 package doppio
 
@@ -11,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/tidwall/doppio/internal"
 )
 
 func (ln *listener) close() {
@@ -74,13 +76,13 @@ type conn struct {
 }
 
 func serve(events Events, lns []*listener) error {
-	p, err := makepoll()
+	p, err := internal.MakePoll()
 	if err != nil {
 		return err
 	}
 	defer syscall.Close(p)
 	for _, ln := range lns {
-		if err := addread(p, ln.fd); err != nil {
+		if err := internal.AddRead(p, ln.fd); err != nil {
 			return err
 		}
 	}
@@ -89,32 +91,16 @@ func serve(events Events, lns []*listener) error {
 	unlock := func() { mu.Unlock() }
 	fdconn := make(map[int]*conn)
 	idconn := make(map[int]*conn)
-	wake := func(id int, out []byte) bool {
+	wake := func(id int) bool {
 		var ok = true
 		var err error
 		lock()
 		c := idconn[id]
 		if c == nil {
 			ok = false
-		} else {
-			// attempt to write to the socket
-			if out != nil {
-				c.outbuf = append(c.outbuf, out...)
-				var n int
-				n, err = syscall.Write(c.fd, c.outbuf)
-				if n > 0 && err == nil {
-					c.outpos += n
-				}
-				if len(c.outbuf)-c.outpos > 0 {
-					err = c.addwrite()
-					// } else {
-					// 	c.outbuf = nil //c.outbuf[:0]
-					// 	c.outpos = 0
-				}
-			} else if !c.wake {
-				c.wake = true
-				err = c.addwrite()
-			}
+		} else if !c.wake {
+			c.wake = true
+			err = internal.AddWrite(c.p, c.fd, &c.writeon)
 		}
 		unlock()
 		if err != nil {
@@ -150,14 +136,14 @@ func serve(events Events, lns []*listener) error {
 	}()
 	var id int
 	var packet [0xFFFF]byte
-	var evs = makeevents(32)
+	var evs = internal.MakeEvents(64)
 	var lastTicker time.Time
 	var tickerDelay time.Duration
 	if events.Tick == nil {
 		tickerDelay = time.Hour
 	}
 	for {
-		pn, err := wait(p, evs, tickerDelay)
+		pn, err := internal.Wait(p, evs, tickerDelay)
 		if err != nil && err != syscall.EINTR {
 			return err
 		}
@@ -180,7 +166,7 @@ func serve(events Events, lns []*listener) error {
 			var n int
 			var out []byte
 			var ln *listener
-			var fd = getfd(evs, i)
+			var fd = internal.GetFD(evs, i)
 			var sa syscall.Sockaddr
 			for _, ln = range lns {
 				if fd == ln.fd {
@@ -201,7 +187,7 @@ func serve(events Events, lns []*listener) error {
 			if err = syscall.SetNonblock(nfd, true); err != nil {
 				goto fail
 			}
-			if err = addread(p, nfd); err != nil {
+			if err = internal.AddRead(p, nfd); err != nil {
 				goto fail
 			}
 			id++
@@ -214,7 +200,7 @@ func serve(events Events, lns []*listener) error {
 				lock()
 				if c.opts.TCPKeepAlive > 0 {
 					if _, ok := ln.ln.(*net.TCPListener); ok {
-						if err = setkeepalive(c.fd, int(c.opts.TCPKeepAlive/time.Second)); err != nil {
+						if err = internal.SetKeepAlive(c.fd, int(c.opts.TCPKeepAlive/time.Second)); err != nil {
 							goto fail
 						}
 					}
@@ -277,7 +263,7 @@ func serve(events Events, lns []*listener) error {
 						goto close
 					}
 					if err == syscall.EAGAIN {
-						if err = c.addwrite(); err != nil {
+						if err = internal.AddWrite(c.p, c.fd, &c.writeon); err != nil {
 							goto fail
 						}
 						goto next
@@ -286,8 +272,8 @@ func serve(events Events, lns []*listener) error {
 				}
 				c.outpos += n
 				if len(c.outbuf)-c.outpos == 0 {
-					c.outbuf = c.outbuf[:0]
 					c.outpos = 0
+					c.outbuf = nil
 				}
 			}
 			if c.action == Shutdown {
@@ -295,7 +281,7 @@ func serve(events Events, lns []*listener) error {
 			}
 			if len(c.outbuf)-c.outpos == 0 {
 				if !c.wake {
-					if err = c.delwrite(); err != nil {
+					if err = internal.DelWrite(c.p, c.fd, &c.writeon); err != nil {
 						goto fail
 					}
 				}
@@ -303,7 +289,7 @@ func serve(events Events, lns []*listener) error {
 					goto close
 				}
 			} else {
-				if err = c.addwrite(); err != nil {
+				if err = internal.AddWrite(c.p, c.fd, &c.writeon); err != nil {
 					goto fail
 				}
 			}

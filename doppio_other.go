@@ -1,4 +1,4 @@
-// +build !darwin,!linux
+// +build !darwin,!netbsd,!freebsd,!openbsd,!dragonfly,!linux
 
 package doppio
 
