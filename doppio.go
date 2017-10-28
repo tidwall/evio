@@ -36,7 +36,7 @@ type Events struct {
 	// Serving fires when the server can accept connections.
 	// The wake parameter is a goroutine-safe function that triggers
 	// a Data event (with a nil `in` parameter) for the specified id.
-	Serving func(wake func(id int) bool) (action Action)
+	Serving func(wake func(id int, out []byte) bool) (action Action)
 	// Opened fires when a new connection has opened.
 	// Use the out return value to write data to the connection.
 	Opened func(id int, addr string) (out []byte, opts Options, action Action)
@@ -180,7 +180,7 @@ func servestdlib(events Events, lns []*listener) error {
 	var id int
 	var connconn = make(map[net.Conn]*cconn)
 	var idconn = make(map[int]*cconn)
-	wake := func(id int) bool {
+	wake := func(id int, out []byte) bool {
 		var ok = true
 		var err error
 		lock()

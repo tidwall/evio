@@ -20,7 +20,7 @@ type request struct {
 type conn struct {
 	id   int
 	addr string
-	wake func(id int) bool
+	wake func(id int, out []byte) bool
 
 	cond   *sync.Cond
 	in     []byte
@@ -56,7 +56,13 @@ func (c *conn) run() {
 		}
 		if c.outi > c.outw || c.action != doppio.None {
 			c.outw = c.outi
-			c.wake(c.id)
+			if c.action == doppio.None {
+				c.wake(c.id, c.out)
+				c.out = nil
+			} else {
+				c.wake(c.id, nil)
+			}
+
 		}
 		c.cond.Wait()
 	}
@@ -78,30 +84,32 @@ func main() {
 			}
 			go func(conn net.Conn) {
 				defer conn.Close()
-				addr := conn.RemoteAddr().String()
-				var in []byte
+				//addr := conn.RemoteAddr().String()
+				//var in []byte
 				var packet [0xFFFF]byte
 				for {
-					n, err := conn.Read(packet[:])
+					_, err := conn.(*net.TCPConn).Read(packet[:])
 					if err != nil {
 						return
 					}
-					in = append(in, packet[:n]...)
-					data := in
-					for {
-						out, leftover, action := execdata(data, addr)
-						if len(out) > 0 {
-							conn.Write(out)
-						}
-						if action != doppio.None {
-							return
-						}
-						if len(leftover) == len(data) {
-							break
-						}
-						data = leftover
-					}
-					in = append(in[:0], data...)
+					conn.Write(appendresp(nil, nil, "200 OK", "", "Hello World!"))
+
+					// in = append(in, packet[:n]...)
+					// data := in
+					// for {
+					// 	out, leftover, action := execdata(data, addr)
+					// 	if len(out) > 0 {
+					// 		conn.Write(out)
+					// 	}
+					// 	if action != doppio.None {
+					// 		return
+					// 	}
+					// 	if len(leftover) == len(data) {
+					// 		break
+					// 	}
+					// 	data = leftover
+					// }
+					// in = append(in[:0], data...)
 				}
 			}(conn)
 		}
@@ -110,9 +118,9 @@ func main() {
 
 	var events doppio.Events
 	var conns = make(map[int]*conn)
-	var wake func(id int) bool
+	var wake func(id int, out []byte) bool
 
-	events.Serving = func(wakefn func(id int) bool) (action doppio.Action) {
+	events.Serving = func(wakefn func(id int, out []byte) bool) (action doppio.Action) {
 		log.Print("http server started on port 8080")
 		wake = wakefn
 		return
@@ -141,19 +149,19 @@ func main() {
 
 	// Deal with incoming data
 	events.Data = func(id int, in []byte) (out []byte, action doppio.Action) {
+		//out = appendresp(out, nil, "200 OK", "", "Hello World!") //[]byte("HTTP/1.1 200 OK\r\n\r\n")
+		// return
 		c := conns[id]
 		if in == nil {
 			// from wakeup
 			c.cond.L.Lock()
 			out, action = c.out, c.action
 			c.out = nil
-			//println(456)
 			c.cond.L.Unlock()
 		} else {
 			// new data
 			c.cond.L.Lock()
 			c.in = append(c.in, in...)
-			//println(123)
 			c.cond.Broadcast()
 			c.cond.L.Unlock()
 		}
@@ -176,11 +184,9 @@ func appendresp(b []byte, req *request, status, head, body string) []byte {
 	b = append(b, "Date: "...)
 	b = time.Now().AppendFormat(b, "Mon, 02 Jan 2006 15:04:05 GMT")
 	b = append(b, '\r', '\n')
-	if len(body) > 0 {
-		b = append(b, "Content-Length: "...)
-		b = strconv.AppendInt(b, int64(len(body)), 10)
-		b = append(b, '\r', '\n')
-	}
+	b = append(b, "Content-Length: "...)
+	b = strconv.AppendInt(b, int64(len(body)), 10)
+	b = append(b, '\r', '\n')
 	b = append(b, head...)
 	b = append(b, '\r', '\n')
 	if len(body) > 0 {

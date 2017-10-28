@@ -89,16 +89,32 @@ func serve(events Events, lns []*listener) error {
 	unlock := func() { mu.Unlock() }
 	fdconn := make(map[int]*conn)
 	idconn := make(map[int]*conn)
-	wake := func(id int) bool {
+	wake := func(id int, out []byte) bool {
 		var ok = true
 		var err error
 		lock()
 		c := idconn[id]
 		if c == nil {
 			ok = false
-		} else if !c.wake {
-			c.wake = true
-			err = c.addwrite()
+		} else {
+			// attempt to write to the socket
+			if out != nil {
+				c.outbuf = append(c.outbuf, out...)
+				var n int
+				n, err = syscall.Write(c.fd, c.outbuf)
+				if n > 0 && err == nil {
+					c.outpos += n
+				}
+				if len(c.outbuf)-c.outpos > 0 {
+					err = c.addwrite()
+					// } else {
+					// 	c.outbuf = nil //c.outbuf[:0]
+					// 	c.outpos = 0
+				}
+			} else if !c.wake {
+				c.wake = true
+				err = c.addwrite()
+			}
 		}
 		unlock()
 		if err != nil {
