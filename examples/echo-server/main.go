@@ -3,21 +3,21 @@ package main
 import (
 	"log"
 
-	"github.com/tidwall/doppio"
+	"github.com/tidwall/evio"
 )
 
 func main() {
-	var events doppio.Events
+	var events evio.Events
 
-	events.Serving = func(wake func(id int) bool) (action doppio.Action) {
+	events.Serving = func(wake func(id int) bool) (action evio.Action) {
 		log.Print("echo server started on port 5000")
 		return
 	}
 
-	events.Data = func(id int, in []byte) (out []byte, action doppio.Action) {
+	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 		out = in
 		return
 	}
 
-	log.Fatal(doppio.Serve(events, "tcp://0.0.0.0:5000"))
+	log.Fatal(evio.Serve(events, "tcp://0.0.0.0:5000"))
 }

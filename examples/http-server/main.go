@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tidwall/doppio"
+	"github.com/tidwall/evio"
 )
 
 type request struct {
@@ -19,32 +19,32 @@ type request struct {
 
 type conn struct {
 	addr string
-	is   doppio.InputStream
+	is   evio.InputStream
 }
 
 func main() {
-	var events doppio.Events
+	var events evio.Events
 	var conns = make(map[int]*conn)
 
-	events.Serving = func(wakefn func(id int) bool) (action doppio.Action) {
+	events.Serving = func(wakefn func(id int) bool) (action evio.Action) {
 		log.Print("http server started on port 8080")
 		return
 	}
 
-	events.Opened = func(id int, addr string) (out []byte, opts doppio.Options, action doppio.Action) {
+	events.Opened = func(id int, addr string) (out []byte, opts evio.Options, action evio.Action) {
 		conns[id] = &conn{addr: addr}
 		log.Printf("%s: opened", addr)
 		return
 	}
 
-	events.Closed = func(id int) (action doppio.Action) {
+	events.Closed = func(id int) (action evio.Action) {
 		c := conns[id]
 		log.Printf("%s: closed", c.addr)
 		delete(conns, id)
 		return
 	}
 
-	events.Data = func(id int, in []byte) (out []byte, action doppio.Action) {
+	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 		c := conns[id]
 		data := c.is.Begin(in)
 		// process the pipeline
@@ -54,7 +54,7 @@ func main() {
 			if err != nil {
 				// bad thing happened
 				out = appendresp(out, "500 Error", "", err.Error()+"\n")
-				action = doppio.Close
+				action = evio.Close
 				break
 			} else if len(leftover) == len(data) {
 				// request not ready, yet
@@ -68,7 +68,7 @@ func main() {
 		c.is.End(data)
 		return
 	}
-	log.Fatal(doppio.Serve(events, "tcp://0.0.0.0:8080"))
+	log.Fatal(evio.Serve(events, "tcp://0.0.0.0:8080"))
 }
 
 // appendhandle handles the incoming request and appends the response to

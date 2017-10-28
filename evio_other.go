@@ -1,6 +1,6 @@
 // +build !darwin,!netbsd,!freebsd,!openbsd,!dragonfly,!linux
 
-package doppio
+package evio
 
 import "os"
 

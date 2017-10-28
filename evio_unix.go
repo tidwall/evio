@@ -1,6 +1,6 @@
 // +build netbsd openbsd freebsd darwin dragonfly linux
 
-package doppio
+package evio
 
 import (
 	"errors"
@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tidwall/doppio/internal"
+	"github.com/tidwall/evio/internal"
 )
 
 func (ln *listener) close() {
