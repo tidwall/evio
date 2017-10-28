@@ -19,5 +19,5 @@ func main() {
 		return
 	}
 
-	log.Fatal(doppio.Serve(events, "tcp://0.0.0.0:5000", "unix://socket"))
+	log.Fatal(doppio.Serve(events, "tcp://0.0.0.0:5000"))
 }

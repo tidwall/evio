@@ -68,7 +68,6 @@ func main() {
 		c.is.End(data)
 		return
 	}
-
 	log.Fatal(doppio.Serve(events, "tcp://0.0.0.0:8080"))
 }
 

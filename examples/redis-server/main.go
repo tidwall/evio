@@ -53,7 +53,19 @@ func main() {
 				default:
 					out = redcon.AppendError(out, "ERR unknown command '"+string(args[0])+"'")
 				case "PING":
-					out = redcon.AppendString(out, "PONG")
+					if len(args) > 2 {
+						out = redcon.AppendError(out, "ERR wrong number of arguments for '"+string(args[0])+"' command")
+					} else if len(args) == 2 {
+						out = redcon.AppendBulk(out, args[1])
+					} else {
+						out = redcon.AppendString(out, "PONG")
+					}
+				case "ECHO":
+					if len(args) != 2 {
+						out = redcon.AppendError(out, "ERR wrong number of arguments for '"+string(args[0])+"' command")
+					} else {
+						out = redcon.AppendBulk(out, args[1])
+					}
 				case "SHUTDOWN":
 					out = redcon.AppendString(out, "OK")
 					action = doppio.Shutdown
