@@ -50,7 +50,7 @@ func testServe(network, addr string, unix bool, nclients int) {
 	events.Serving = func(wake func(id int) bool) (action Action) {
 		return
 	}
-	events.Opened = func(id int, addr string) (out []byte, opts Options, action Action) {
+	events.Opened = func(id int, lnidx int, laddr, raddr net.Addr) (out []byte, opts Options, action Action) {
 		connected++
 		out = []byte("sweetness\r\n")
 		opts.TCPKeepAlive = time.Minute * 5
@@ -160,7 +160,7 @@ func testWake(addr string, stdlib bool) {
 	var cin []byte
 	var cclosed bool
 	var cond = sync.NewCond(&sync.Mutex{})
-	events.Opened = func(id int, addr string) (out []byte, opts Options, action Action) {
+	events.Opened = func(id int, lnidx int, laddr, raddr net.Addr) (out []byte, opts Options, action Action) {
 		cid = id
 		return
 	}

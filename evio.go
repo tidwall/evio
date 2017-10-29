@@ -39,7 +39,7 @@ type Events struct {
 	Serving func(wake func(id int) bool) (action Action)
 	// Opened fires when a new connection has opened.
 	// Use the out return value to write data to the connection.
-	Opened func(id int, addr string) (out []byte, opts Options, action Action)
+	Opened func(id int, addr net.Addr) (out []byte, opts Options, action Action)
 	// Opened fires when a connection is closed
 	Closed func(id int) (action Action)
 	// Detached fires when a connection has been previously detached.
@@ -157,7 +157,10 @@ func servestdlib(events Events, lns []*listener) error {
 		detached bool
 	}
 	type fail struct{ err error }
-	type accept struct{ conn net.Conn }
+	type accept struct {
+		lnidx int
+		conn  net.Conn
+	}
 	type read struct {
 		conn   net.Conn
 		packet []byte
@@ -182,15 +185,15 @@ func servestdlib(events Events, lns []*listener) error {
 			unlock()
 		}
 	}
-	for _, ln := range lns {
-		go func(ln net.Listener) {
+	for i, ln := range lns {
+		go func(lnidx int, ln net.Listener) {
 			for {
 				conn, err := ln.Accept()
 				if err != nil {
 					send(fail{err}, true)
 					return
 				}
-				send(accept{conn}, true)
+				send(accept{lnidx, conn}, true)
 				go func(conn net.Conn) {
 					defer send(close{conn}, true)
 					var packet [0xFFFF]byte
@@ -204,7 +207,7 @@ func servestdlib(events Events, lns []*listener) error {
 					}
 				}(conn)
 			}
-		}(ln.ln)
+		}(i, ln.ln)
 	}
 	var id int
 	var connconn = make(map[net.Conn]*cconn)
@@ -294,7 +297,7 @@ again:
 				idconn[id] = c
 				if events.Opened != nil {
 					unlock()
-					out, opts, action := events.Opened(id, ev.conn.RemoteAddr().String())
+					out, opts, action := events.Opened(id, ev.lnidx, ev.conn.LocalAddr(), ev.conn.RemoteAddr())
 					lock()
 					if opts.TCPKeepAlive > 0 {
 						if conn, ok := ev.conn.(*net.TCPConn); ok {

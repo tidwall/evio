@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net"
 	"strings"
 
 	"github.com/tidwall/evio"
@@ -18,16 +19,15 @@ func main() {
 	var keys = make(map[string]string)
 	var events evio.Events
 	events.Serving = func(wake func(id int) bool) (action evio.Action) {
-
 		log.Printf("serving at tcp port 6380")
 		log.Printf("serving on unix socket")
 		return
 	}
-	events.Opened = func(id int, addr string) (out []byte, opts evio.Options, action evio.Action) {
-
+	events.Opened = func(id int, lnidx int, laddr, raddr net.Addr) (out []byte, opts evio.Options, action evio.Action) {
 		conns[id] = &conn{}
 		return
 	}
+
 	events.Closed = func(id int) (action evio.Action) {
 
 		delete(conns, id)

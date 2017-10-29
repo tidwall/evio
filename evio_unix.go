@@ -166,9 +166,10 @@ func serve(events Events, lns []*listener) error {
 			var n int
 			var out []byte
 			var ln *listener
+			var lnidx int
 			var fd = internal.GetFD(evs, i)
 			var sa syscall.Sockaddr
-			for _, ln = range lns {
+			for lnidx, ln = range lns {
 				if fd == ln.fd {
 					goto accept
 				}
@@ -195,8 +196,10 @@ func serve(events Events, lns []*listener) error {
 			fdconn[nfd] = c
 			idconn[id] = c
 			if events.Opened != nil {
+				laddr := getlocaladdr(fd, ln.ln)
+				raddr := getaddr(sa, ln.ln)
 				unlock()
-				out, c.opts, c.action = events.Opened(c.id, getaddr(sa, ln.ln))
+				out, c.opts, c.action = events.Opened(c.id, Addr{lnidx, laddr, raddr})
 				lock()
 				if c.opts.TCPKeepAlive > 0 {
 					if _, ok := ln.ln.(*net.TCPListener); ok {
@@ -331,15 +334,22 @@ func serve(events Events, lns []*listener) error {
 	}
 }
 
-func getaddr(sa syscall.Sockaddr, ln net.Listener) string {
+func getlocaladdr(fd int, ln net.Listener) net.Addr {
+	sa, _ := syscall.Getsockname(fd)
+	return getaddr(sa, ln)
+}
+
+func getaddr(sa syscall.Sockaddr, ln net.Listener) net.Addr {
 	switch ln.(type) {
 	default:
-		return ""
+		return nil
 	case *net.UnixListener:
-		return ln.Addr().String()
+		return ln.Addr()
 	case *net.TCPListener:
 		var addr net.TCPAddr
 		switch sa := sa.(type) {
+		default:
+			return nil
 		case *syscall.SockaddrInet4:
 			addr.IP = net.IP(sa.Addr[:])
 			addr.Port = sa.Port
@@ -350,6 +360,6 @@ func getaddr(sa syscall.Sockaddr, ln net.Listener) string {
 				addr.Zone = strconv.FormatInt(int64(sa.ZoneId), 10)
 			}
 		}
-		return addr.String()
+		return &addr
 	}
 }
