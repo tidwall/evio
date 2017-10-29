@@ -123,10 +123,8 @@ $ telnet localhost 5000
 You can bind to multiple address and share the same event loop.
 
 ```go
-evio.Serve(events, "tcp://127.0.0
+evio.Serve(events, "tcp://192.168.0.10:5000", "unix://socket")
 ```
-
-
 
 ## More examples
 
