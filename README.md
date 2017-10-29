@@ -118,6 +118,14 @@ Connect to the server:
 $ telnet localhost 5000
 ```
 
+### Multiple addresses
+
+You can bind to multiple address and share the same event loop.
+
+```go
+evio.Serve(events, "tcp://192.168.0.10:5000", "unix://socket")
+```
+
 ## More examples
 
 Please check out the [examples](examples) subdirectory for a simplified [redis](examples/redis-server/main.go) clone, an [echo](examples/echo-server/main.go) server, and a very basic [http](examples/http-server/main.go) server.
