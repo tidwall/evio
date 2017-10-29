@@ -9,46 +9,61 @@ import (
 	"time"
 )
 
-// Action is an action that occurs after the completion of an event
+// Action is an action that occurs after the completion of an event.
 type Action int
 
 const (
-	// None indicates that no action should happen
+	// None indicates that no action should occur following an event.
 	None Action = iota
-	// Detach detaches the connection
+	// Detach detaches the client.
 	Detach
-	// Close closes the connection
+	// Close closes the client.
 	Close
-	// Shutdown shutdowns the server
+	// Shutdown shutdowns the server.
 	Shutdown
 )
 
-// Options are set when the connection opens
+// Options are set when the client opens.
 type Options struct {
-	// TCPKeepAlive (SO_KEEPALIVE)
+	// TCPKeepAlive (SO_KEEPALIVE) socket option.
 	TCPKeepAlive time.Duration
 }
 
+// Addr represents the connection's remote and local addresses.
 type Addr struct {
-	Index  int
-	Local  net.Addr
+	// Index is the index of server address that was passed to the Serve call.
+	Index int
+	// Local is the connection's local socket address.
+	Local net.Addr
+	// Local is the connection's remote peer address.
 	Remote net.Addr
 }
 
-// Events represents server events
+// Events represents the server events for the Serve call.
+// Each event has an Action return value that is used manage the state
+// of the connection and server.
 type Events struct {
 	// Serving fires when the server can accept connections.
 	// The wake parameter is a goroutine-safe function that triggers
 	// a Data event (with a nil `in` parameter) for the specified id.
 	Serving func(wake func(id int) bool) (action Action)
 	// Opened fires when a new connection has opened.
+	// The addr parameter is the connection's local and remote addresses.
 	// Use the out return value to write data to the connection.
+	// The opts return value is used to set connection options.
 	Opened func(id int, addr Addr) (out []byte, opts Options, action Action)
-	// Opened fires when a connection is closed
+	// Opened fires when a connection is closed.
 	Closed func(id int) (action Action)
 	// Detached fires when a connection has been previously detached.
+	// Once detached it's up to the receiver of this event to manage the
+	// state of the connection. The Closed event will not be called for
+	// this connection.
+	// The conn parameter is a ReadWriteCloser that represents the
+	// underlying socket connection. It can be freely used in goroutines
+	// and should be closed when no longer needed.
 	Detached func(id int, conn io.ReadWriteCloser) (action Action)
 	// Data fires when a connection sends the server data.
+	// The in parameter is the incoming data.
 	// Use the out return value to write data to the connection.
 	Data func(id int, in []byte) (out []byte, action Action)
 	// Prewrite fires prior to every write attempt.
@@ -67,7 +82,16 @@ type Events struct {
 }
 
 // Serve starts handling events for the specified addresses.
-// Addresses should be formatted like `tcp://192.168.0.10:9851` or `unix://socket`.
+//
+// Addresses should use a scheme prefix and be be formatted
+// like `tcp://192.168.0.10:9851` or `unix://socket`.
+// Valid schemes:
+//	tcp   - bind to both IPv4 and IPv6
+//  tcp4  - IPv4
+//  tcp6  - IPv6
+//  unix  - Unix Domain Socket
+//
+// The "tcp" scheme is assumed when one is not specified.
 func Serve(events Events, addr ...string) error {
 	if len(addr) == 0 {
 		return errors.New("nothing to serve")
@@ -119,9 +143,6 @@ type InputStream struct{ b []byte }
 // Begin accepts a new packet and returns a working sequence of
 // unprocessed bytes.
 func (is *InputStream) Begin(packet []byte) (data []byte) {
-	if is == nil {
-		return packet
-	}
 	data = packet
 	if len(is.b) > 0 {
 		is.b = append(is.b, data...)
