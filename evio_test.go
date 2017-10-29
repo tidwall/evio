@@ -31,11 +31,11 @@ func TestServe(t *testing.T) {
 		wg.Done()
 	}()
 	go func() {
-		testServe("tcp-stdlib", ":9992", false, 10)
+		testServe("tcp-net", ":9992", false, 10)
 		wg.Done()
 	}()
 	go func() {
-		testServe("tcp-stdlib", ":9993", true, 10)
+		testServe("tcp-net", ":9993", true, 10)
 		wg.Done()
 	}()
 	wg.Wait()
@@ -50,7 +50,7 @@ func testServe(network, addr string, unix bool, nclients int) {
 	events.Serving = func(wake func(id int) bool) (action Action) {
 		return
 	}
-	events.Opened = func(id int, lnidx int, laddr, raddr net.Addr) (out []byte, opts Options, action Action) {
+	events.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
 		connected++
 		out = []byte("sweetness\r\n")
 		opts.TCPKeepAlive = time.Minute * 5
@@ -92,7 +92,7 @@ func testServe(network, addr string, unix bool, nclients int) {
 }
 
 func startClient(network, addr string) {
-	network = strings.Replace(network, "-stdlib", "", -1)
+	network = strings.Replace(network, "-net", "", -1)
 	rand.Seed(time.Now().UnixNano())
 	c, err := net.Dial(network, addr)
 	if err != nil {
@@ -160,7 +160,7 @@ func testWake(addr string, stdlib bool) {
 	var cin []byte
 	var cclosed bool
 	var cond = sync.NewCond(&sync.Mutex{})
-	events.Opened = func(id int, lnidx int, laddr, raddr net.Addr) (out []byte, opts Options, action Action) {
+	events.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
 		cid = id
 		return
 	}
@@ -201,18 +201,16 @@ func testWake(addr string, stdlib bool) {
 		return
 	}
 	if stdlib {
-		must(Serve(events, "tcp-stdlib://:54321"))
+		must(Serve(events, "tcp-net://:54321"))
 	} else {
 		must(Serve(events, "tcp://:54321"))
 	}
 }
-
 func must(err error) {
 	if err != nil {
 		panic(err)
 	}
 }
-
 func TestTick(t *testing.T) {
 	testTick(":54321", false)
 	testTick(":54321", true)
@@ -231,7 +229,7 @@ func testTick(addr string, stdlib bool) {
 		return
 	}
 	if stdlib {
-		must(Serve(events, "tcp-stdlib://:54321"))
+		must(Serve(events, "tcp-net://:54321"))
 	} else {
 		must(Serve(events, "tcp://:54321"))
 	}

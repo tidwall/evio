@@ -18,7 +18,7 @@ type request struct {
 }
 
 type conn struct {
-	addr string
+	addr evio.Addr
 	is   evio.InputStream
 }
 
@@ -31,15 +31,15 @@ func main() {
 		return
 	}
 
-	events.Opened = func(id int, addr string) (out []byte, opts evio.Options, action evio.Action) {
+	events.Opened = func(id int, addr evio.Addr) (out []byte, opts evio.Options, action evio.Action) {
 		conns[id] = &conn{addr: addr}
-		log.Printf("%s: opened", addr)
+		log.Printf("%s: opened", addr.Remote.String())
 		return
 	}
 
 	events.Closed = func(id int) (action evio.Action) {
 		c := conns[id]
-		log.Printf("%s: closed", c.addr)
+		log.Printf("%s: closed", c.addr.Remote.String())
 		delete(conns, id)
 		return
 	}
@@ -61,7 +61,7 @@ func main() {
 				break
 			}
 			// handle the request
-			req.remoteAddr = c.addr
+			req.remoteAddr = c.addr.Remote.String()
 			out = appendhandle(out, &req)
 			data = leftover
 		}

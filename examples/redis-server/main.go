@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"net"
 	"strings"
 
 	"github.com/tidwall/evio"
@@ -23,7 +22,7 @@ func main() {
 		log.Printf("serving on unix socket")
 		return
 	}
-	events.Opened = func(id int, lnidx int, laddr, raddr net.Addr) (out []byte, opts evio.Options, action evio.Action) {
+	events.Opened = func(id int, addr evio.Addr) (out []byte, opts evio.Options, action evio.Action) {
 		conns[id] = &conn{}
 		return
 	}
