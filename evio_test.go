@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -230,12 +231,69 @@ func testTick(addr string, stdlib bool) {
 		return
 	}
 	if stdlib {
-		must(Serve(events, "tcp-net://:54321"))
+		must(Serve(events, "tcp-net://"+addr))
 	} else {
-		must(Serve(events, "tcp://:54321"))
+		must(Serve(events, "tcp://"+addr))
 	}
 	dur := time.Since(start)
 	if dur < 250&time.Millisecond || dur > time.Second {
 		panic("bad ticker timing")
 	}
+}
+
+func TestDetach(t *testing.T) {
+	testDetach(":54231", false)
+	testDetach(":54231", true)
+}
+func testDetach(addr string, stdlib bool) {
+	var events Events
+	events.Data = func(id int, in []byte) (out []byte, action Action) {
+		if string(in) == "detach\r\n" {
+			return nil, Detach
+		}
+		out = in
+		return
+	}
+	expected := "detached\r\n"
+	var done int64
+	events.Detached = func(id int, rwc io.ReadWriteCloser) (action Action) {
+		go func() {
+			n, err := rwc.Write([]byte(expected))
+			must(err)
+			if n != len(expected) {
+				panic("not enough data written")
+			}
+		}()
+		return
+	}
+	events.Serving = func(_ func(id int) bool) (action Action) {
+		go func() {
+			conn, err := net.Dial("tcp", addr)
+			must(err)
+			defer conn.Close()
+			_, err = conn.Write([]byte("detach\r\n"))
+			must(err)
+			packet := make([]byte, len(expected))
+			_, err = io.ReadFull(conn, packet)
+			must(err)
+			if string(packet) != string(expected) {
+				must(fmt.Errorf("mismatch: expected '%s', got '%s'", expected, packet))
+			}
+			atomic.StoreInt64(&done, 1)
+		}()
+		return
+	}
+	events.Tick = func() (delay time.Duration, action Action) {
+		delay = time.Second / 5
+		if atomic.LoadInt64(&done) == 1 {
+			action = Shutdown
+		}
+		return
+	}
+	if stdlib {
+		must(Serve(events, "tcp-net://"+addr))
+	} else {
+		must(Serve(events, "tcp://"+addr))
+	}
+
 }

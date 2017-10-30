@@ -49,23 +49,7 @@ func (ln *listener) system() error {
 	return syscall.SetNonblock(ln.fd, true)
 }
 
-type detachedConn struct {
-	fd int
-}
-
-func (c *detachedConn) Read(p []byte) (n int, err error) {
-	return syscall.Read(c.fd, p)
-}
-func (c *detachedConn) Write(p []byte) (n int, err error) {
-	return syscall.Write(c.fd, p)
-}
-func (c *detachedConn) Close() error {
-	err := syscall.Close(c.fd)
-	c.fd = 0
-	return err
-}
-
-type conn struct {
+type unixConn struct {
 	id, fd, p int
 	outbuf    []byte
 	outpos    int
@@ -73,6 +57,35 @@ type conn struct {
 	opts      Options
 	wake      bool
 	writeon   bool
+	detached  bool
+}
+
+func (c *unixConn) Read(p []byte) (n int, err error) {
+	n, err = syscall.Read(c.fd, p)
+	return
+}
+func (c *unixConn) Write(p []byte) (n int, err error) {
+	if c.detached {
+		c.outbuf = append(c.outbuf, p...)
+		for len(c.outbuf) > 0 {
+			n, err = syscall.Write(c.fd, c.outbuf)
+			if err != nil {
+				return
+			}
+			if n > 0 {
+				c.outbuf = c.outbuf[n:]
+			}
+		}
+		c.outbuf = nil
+	} else {
+		n, err = syscall.Write(c.fd, p)
+	}
+	return
+}
+func (c *unixConn) Close() error {
+	err := syscall.Close(c.fd)
+	c.fd = 0
+	return err
 }
 
 func serve(events Events, lns []*listener) error {
@@ -89,8 +102,8 @@ func serve(events Events, lns []*listener) error {
 	var mu sync.Mutex
 	lock := func() { mu.Lock() }
 	unlock := func() { mu.Unlock() }
-	fdconn := make(map[int]*conn)
-	idconn := make(map[int]*conn)
+	fdconn := make(map[int]*unixConn)
+	idconn := make(map[int]*unixConn)
 	wake := func(id int) bool {
 		var ok = true
 		var err error
@@ -161,7 +174,7 @@ func serve(events Events, lns []*listener) error {
 		lock()
 		for i := 0; i < pn; i++ {
 			var in []byte
-			var c *conn
+			var c *unixConn
 			var nfd int
 			var n int
 			var out []byte
@@ -192,7 +205,7 @@ func serve(events Events, lns []*listener) error {
 				goto fail
 			}
 			id++
-			c = &conn{id: id, fd: nfd, p: p}
+			c = &unixConn{id: id, fd: nfd, p: p}
 			fdconn[nfd] = c
 			idconn[id] = c
 			if events.Opened != nil {
@@ -209,6 +222,9 @@ func serve(events Events, lns []*listener) error {
 					}
 				}
 				if len(out) > 0 {
+					if events.TranslateOut != nil {
+						out = events.TranslateOut(c.id, out)
+					}
 					c.outbuf = append(c.outbuf, out...)
 				}
 			}
@@ -220,7 +236,7 @@ func serve(events Events, lns []*listener) error {
 			if c.wake {
 				c.wake = false
 			} else {
-				n, err = syscall.Read(c.fd, packet[:])
+				n, err = c.Read(packet[:])
 				if n == 0 || err != nil {
 					if err == syscall.EAGAIN {
 						goto write
@@ -228,6 +244,9 @@ func serve(events Events, lns []*listener) error {
 					goto close
 				}
 				in = append([]byte{}, packet[:n]...)
+				if events.TranslateIn != nil {
+					in = events.TranslateIn(c.id, in)
+				}
 			}
 			if events.Data != nil {
 				unlock()
@@ -235,6 +254,9 @@ func serve(events Events, lns []*listener) error {
 				lock()
 			}
 			if len(out) > 0 {
+				if events.TranslateOut != nil {
+					out = events.TranslateOut(c.id, out)
+				}
 				c.outbuf = append(c.outbuf, out...)
 			}
 			goto write
@@ -248,7 +270,7 @@ func serve(events Events, lns []*listener) error {
 						c.action = Shutdown
 					}
 				}
-				n, err = syscall.Write(c.fd, c.outbuf[c.outpos:])
+				n, err = c.Write(c.outbuf[c.outpos:])
 				if events.Postwrite != nil {
 					amount := n
 					if amount < 0 {
@@ -302,8 +324,16 @@ func serve(events Events, lns []*listener) error {
 			delete(idconn, c.id)
 			if c.action == Detach {
 				if events.Detached != nil {
+					c.detached = true
+					if len(c.outbuf)-c.outpos > 0 {
+						c.outbuf = append(c.outbuf[:0], c.outbuf[c.outpos:]...)
+					} else {
+						c.outbuf = nil
+					}
+					c.outpos = 0
+					syscall.SetNonblock(c.fd, false)
 					unlock()
-					c.action = events.Detached(c.id, &detachedConn{c.fd})
+					c.action = events.Detached(c.id, c)
 					lock()
 					if c.action == Shutdown {
 						goto fail

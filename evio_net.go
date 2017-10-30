@@ -9,17 +9,18 @@ import (
 	"time"
 )
 
+type netConn struct {
+	id   int
+	wake int64
+	conn net.Conn
+}
+
 // servenet uses the stdlib net package instead of syscalls.
 func servenet(events Events, lns []*listener) error {
-	type cconn struct {
-		id   int
-		wake int64
-		conn net.Conn
-	}
 	var id int64
 	var mu sync.Mutex
 	var cmu sync.Mutex
-	var idconn = make(map[int]*cconn)
+	var idconn = make(map[int]*netConn)
 	var done bool
 	wake := func(id int) bool {
 		cmu.Lock()
@@ -54,7 +55,7 @@ func servenet(events Events, lns []*listener) error {
 		for id, conn := range idconn {
 			connids = append(connids, connid{conn.conn, id})
 		}
-		idconn = make(map[int]*cconn)
+		idconn = make(map[int]*netConn)
 		cmu.Unlock()
 		mu.Unlock()
 		sort.Slice(connids, func(i, j int) bool {
@@ -101,7 +102,7 @@ func servenet(events Events, lns []*listener) error {
 					var packet [0xFFFF]byte
 					var cout []byte
 					var caction Action
-					c := &cconn{id: id, conn: conn}
+					c := &netConn{id: id, conn: conn}
 					cmu.Lock()
 					idconn[id] = c
 					cmu.Unlock()
@@ -199,6 +200,11 @@ func servenet(events Events, lns []*listener) error {
 						if caction == Shutdown {
 							goto close
 						}
+						if len(cout) == 0 {
+							if caction != None {
+								goto close
+							}
+						}
 						continue
 					close:
 						cmu.Lock()
@@ -212,6 +218,7 @@ func servenet(events Events, lns []*listener) error {
 						mu.Unlock()
 						if caction == Detach {
 							if events.Detached != nil {
+								conn.SetDeadline(time.Time{})
 								mu.Lock()
 								if !done {
 									caction = events.Detached(c.id, conn)

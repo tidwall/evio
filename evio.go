@@ -1,7 +1,6 @@
 package evio
 
 import (
-	"errors"
 	"io"
 	"net"
 	"os"
@@ -27,6 +26,9 @@ const (
 type Options struct {
 	// TCPKeepAlive (SO_KEEPALIVE) socket option.
 	TCPKeepAlive time.Duration
+
+	OutRd io.Reader
+	OutWr io.Writer
 }
 
 // Addr represents the connection's remote and local addresses.
@@ -79,6 +81,9 @@ type Events struct {
 	// Tick fires immediately after the server starts and will fire again
 	// following the duration specified by the delay return value.
 	Tick func() (delay time.Duration, action Action)
+
+	TranslateIn  func(id int, in []byte) []byte
+	TranslateOut func(id int, out []byte) []byte
 }
 
 // Serve starts handling events for the specified addresses.
@@ -93,9 +98,6 @@ type Events struct {
 //
 // The "tcp" scheme is assumed when one is not specified.
 func Serve(events Events, addr ...string) error {
-	if len(addr) == 0 {
-		return errors.New("nothing to serve")
-	}
 	var lns []*listener
 	defer func() {
 		for _, ln := range lns {
