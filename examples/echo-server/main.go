@@ -19,5 +19,5 @@ func main() {
 		return
 	}
 
-	log.Fatal(evio.Serve(events, "tcp://0.0.0.0:5000"))
+	log.Fatal(evio.Serve(events, "tcp-net://0.0.0.0:5000"))
 }

@@ -1,308 +1,273 @@
 package evio
 
 import (
+	"io"
 	"net"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // servenet uses the stdlib net package instead of syscalls.
 func servenet(events Events, lns []*listener) error {
 	type cconn struct {
-		id       int
-		conn     net.Conn
-		outbuf   []byte
-		outpos   int
-		action   Action
-		wake     bool
-		detached bool
+		id   int
+		wake int64
+		conn net.Conn
 	}
-	type fail struct{ err error }
-	type accept struct {
-		lnidx int
-		conn  net.Conn
-	}
-	type read struct {
-		conn   net.Conn
-		packet []byte
-	}
-	type tick struct{}
-	type write struct{ conn net.Conn }
-	type close struct{ conn net.Conn }
-	var cond = sync.NewCond(&sync.Mutex{})
-	lock := func() { cond.L.Lock() }
-	unlock := func() { cond.L.Unlock() }
-	var evs []interface{}
-	send := func(ev interface{}, broadcast bool) {
-		if broadcast {
-			lock()
-		}
-		if _, ok := ev.(fail); ok {
-			evs = evs[:0]
-		}
-		evs = append(evs, ev)
-		if broadcast {
-			cond.Broadcast()
-			unlock()
-		}
-	}
-	for i, ln := range lns {
-		go func(lnidx int, ln net.Listener) {
-			for {
-				conn, err := ln.Accept()
-				if err != nil {
-					send(fail{err}, true)
-					return
-				}
-				send(accept{lnidx, conn}, true)
-				go func(conn net.Conn) {
-					defer send(close{conn}, true)
-					var packet [0xFFFF]byte
-					for {
-						n, err := conn.Read(packet[:])
-						if err != nil && !istimeout(err) {
-							return
-						} else if n > 0 {
-							send(read{conn, append([]byte{}, packet[:n]...)}, true)
-						}
-					}
-				}(conn)
-			}
-		}(i, ln.ln)
-	}
-	var id int
-	var connconn = make(map[net.Conn]*cconn)
+	var id int64
+	var mu sync.Mutex
+	var cmu sync.Mutex
 	var idconn = make(map[int]*cconn)
+	var done bool
 	wake := func(id int) bool {
-		var ok = true
-		var err error
-		lock()
+		cmu.Lock()
 		c := idconn[id]
+		cmu.Unlock()
 		if c == nil {
-			ok = false
-		} else if !c.wake {
-			c.wake = true
-			send(read{c.conn, nil}, false)
-			cond.Broadcast()
+			return false
 		}
-		unlock()
-		if err != nil {
-			panic(err)
-		}
-		return ok
-
+		atomic.StoreInt64(&c.wake, 1)
+		// force a quick wakeup
+		c.conn.SetDeadline(time.Time{}.Add(1))
+		return true
 	}
-	if events.Serving != nil {
-		if events.Serving(wake) == Shutdown {
-			return nil
+	var ferr error
+	shutdown := func(err error) {
+		mu.Lock()
+		if done {
+			mu.Unlock()
+			return
 		}
-	}
-	defer func() {
-		lock()
+		done = true
+		ferr = err
+		for _, ln := range lns {
+			ln.ln.Close()
+		}
 		type connid struct {
 			conn net.Conn
 			id   int
 		}
 		var connids []connid
+		cmu.Lock()
 		for id, conn := range idconn {
 			connids = append(connids, connid{conn.conn, id})
 		}
+		idconn = make(map[int]*cconn)
+		cmu.Unlock()
+		mu.Unlock()
 		sort.Slice(connids, func(i, j int) bool {
 			return connids[j].id < connids[i].id
 		})
 		for _, connid := range connids {
 			connid.conn.Close()
 			if events.Closed != nil {
-				unlock()
+				mu.Lock()
 				events.Closed(connid.id)
-				lock()
+				mu.Unlock()
 			}
 		}
-		unlock()
-	}()
-	var tickerDelay time.Duration
-	if events.Tick != nil {
-		go func() {
-			for {
-				send(tick{}, true)
-				lock()
-				d := tickerDelay
-				unlock()
-				time.Sleep(d)
-			}
-		}()
 	}
-	lock()
-again:
-	for {
-		for i := 0; i < len(evs); i++ {
-			ev := evs[i]
-			switch ev := ev.(type) {
-			case nil:
-			case tick:
-				if events.Tick != nil {
-					unlock()
-					delay, action := events.Tick()
-					lock()
-					tickerDelay = delay
-					if action == Shutdown {
-						send(fail{nil}, false)
-						continue again
+	if events.Serving != nil {
+		if events.Serving(wake) == Shutdown {
+			return nil
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(lns))
+	for i, ln := range lns {
+		go func(lnidx int, ln net.Listener) {
+			defer wg.Done()
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					if err == io.EOF {
+						shutdown(nil)
+					} else {
+						shutdown(err)
+					}
+					return
+				}
+				id := int(atomic.AddInt64(&id, 1))
+				go func(id int, conn net.Conn) {
+					var closed bool
+					defer func() {
+						if !closed {
+							conn.Close()
+						}
+					}()
+					var packet [0xFFFF]byte
+					var cout []byte
+					var caction Action
+					c := &cconn{id: id, conn: conn}
+					cmu.Lock()
+					idconn[id] = c
+					cmu.Unlock()
+					if events.Opened != nil {
+						var out []byte
+						var opts Options
+						var action Action
+						mu.Lock()
+						if !done {
+							out, opts, action = events.Opened(id, Addr{lnidx, conn.LocalAddr(), conn.RemoteAddr()})
+						}
+						mu.Unlock()
+						if opts.TCPKeepAlive > 0 {
+							if conn, ok := conn.(*net.TCPConn); ok {
+								conn.SetKeepAlive(true)
+								conn.SetKeepAlivePeriod(opts.TCPKeepAlive)
+							}
+						}
+						if len(out) > 0 {
+							cout = append(cout, out...)
+						}
+						caction = action
+					}
+					for {
+						var n int
+						var out []byte
+						var action Action
+						if caction != None {
+							goto write
+						}
+						if len(cout) > 0 {
+							conn.SetReadDeadline(time.Now().Add(time.Microsecond))
+						} else {
+							conn.SetReadDeadline(time.Now().Add(time.Second / 5))
+						}
+						n, err = conn.Read(packet[:])
+						if err != nil && !istimeout(err) {
+							goto close
+						}
+						if n > 0 {
+							if events.Data != nil {
+								mu.Lock()
+								if !done {
+									out, action = events.Data(id, append([]byte{}, packet[:n]...))
+								}
+								mu.Unlock()
+							}
+						} else if atomic.LoadInt64(&c.wake) != 0 {
+							atomic.StoreInt64(&c.wake, 0)
+							if events.Data != nil {
+								mu.Lock()
+								if !done {
+									out, action = events.Data(id, nil)
+								}
+								mu.Unlock()
+							}
+						}
+						if len(out) > 0 {
+							cout = append(cout, out...)
+						}
+						caction = action
+						goto write
+					write:
+						if len(cout) > 0 {
+							if events.Prewrite != nil {
+								mu.Lock()
+								if !done {
+									action = events.Prewrite(id, len(cout))
+								}
+								mu.Unlock()
+								if action == Shutdown {
+									caction = Shutdown
+								}
+							}
+							conn.SetWriteDeadline(time.Now().Add(time.Second / 5))
+							n, err := conn.Write(cout)
+							if err != nil && !istimeout(err) {
+								goto close
+							}
+							cout = cout[n:]
+							if len(cout) == 0 {
+								cout = nil
+							}
+							if events.Postwrite != nil {
+								mu.Lock()
+								if !done {
+									action = events.Postwrite(id, n, len(cout))
+								}
+								mu.Unlock()
+								if action == Shutdown {
+									caction = Shutdown
+								}
+							}
+						}
+						if caction == Shutdown {
+							goto close
+						}
+						continue
+					close:
+						cmu.Lock()
+						delete(idconn, c.id)
+						cmu.Unlock()
+						mu.Lock()
+						if done {
+							mu.Unlock()
+							return
+						}
+						mu.Unlock()
+						if caction == Detach {
+							if events.Detached != nil {
+								mu.Lock()
+								if !done {
+									caction = events.Detached(c.id, conn)
+								}
+								mu.Unlock()
+								closed = true
+								if caction == Shutdown {
+									goto fail
+								}
+								continue
+							}
+						}
+						conn.Close()
+						if events.Closed != nil {
+							var action Action
+							mu.Lock()
+							if !done {
+								action = events.Closed(c.id)
+							}
+							mu.Unlock()
+							if action == Shutdown {
+								caction = Shutdown
+							}
+						}
+						closed = true
+						if caction == Shutdown {
+							goto fail
+						}
+						return
+					fail:
+						shutdown(nil)
+						return
 					}
 
-				}
-			case accept:
-				id++
-				c := &cconn{id: id, conn: ev.conn}
-				connconn[ev.conn] = c
-				idconn[id] = c
-				if events.Opened != nil {
-					unlock()
-					out, opts, action := events.Opened(id,
-						Addr{ev.lnidx, ev.conn.LocalAddr(), ev.conn.RemoteAddr()})
-					lock()
-					if opts.TCPKeepAlive > 0 {
-						if conn, ok := ev.conn.(*net.TCPConn); ok {
-							if err := conn.SetKeepAlive(true); err != nil {
-								send(fail{err}, false)
-								continue again
-							}
-							if err := conn.SetKeepAlivePeriod(opts.TCPKeepAlive); err != nil {
-								send(fail{err}, false)
-								continue again
-							}
-						}
-					}
-					if len(out) > 0 {
-						c.outbuf = append(c.outbuf, out...)
-					}
-					c.action = action
-					if c.action != None || len(c.outbuf) > 0 {
-						send(write{c.conn}, false)
-					}
-				}
-			case read:
-				var out []byte
-				var in []byte
-				c := connconn[ev.conn]
-				if c == nil {
-					continue
-				}
-				if c.action != None {
-					send(write{c.conn}, false)
-					continue
-				}
-				if c.wake {
-					c.wake = false
-				} else {
-					in = ev.packet
-				}
-				if events.Data != nil {
-					unlock()
-					out, c.action = events.Data(c.id, in)
-					lock()
-				}
-				if len(out) > 0 {
-					c.outbuf = append(c.outbuf, out...)
-				}
-				if c.action != None || len(c.outbuf) > 0 {
-					send(write{c.conn}, false)
-				}
-			case write:
-				c := connconn[ev.conn]
-				if c == nil {
-					continue
-				}
-				if len(c.outbuf)-c.outpos > 0 {
-					if events.Prewrite != nil {
-						unlock()
-						action := events.Prewrite(c.id, len(c.outbuf[c.outpos:]))
-						lock()
-						if action > c.action {
-							c.action = action
-						}
-					}
-					c.conn.SetWriteDeadline(time.Now().Add(time.Millisecond))
-					n, err := c.conn.Write(c.outbuf[c.outpos:])
-					if events.Postwrite != nil {
-						amount := n
-						if amount < 0 {
-							amount = 0
-						}
-						unlock()
-						action := events.Postwrite(c.id, amount, len(c.outbuf)-c.outpos-amount)
-						lock()
-						if action > c.action {
-							c.action = action
-						}
-					}
-					if err != nil {
-						if c.action == Shutdown {
-							send(close{c.conn}, false)
-						} else if istimeout(err) {
-							send(write{c.conn}, false)
-						} else {
-							send(close{c.conn}, false)
-						}
-						continue
-					}
-					c.outpos += n
-					if len(c.outbuf)-c.outpos == 0 {
-						c.outbuf = c.outbuf[:0]
-						c.outpos = 0
-					}
-				}
-				if c.action == Shutdown {
-					send(close{c.conn}, false)
-				} else if len(c.outbuf)-c.outpos == 0 {
-					if c.action != None {
-						send(close{c.conn}, false)
-					}
-				} else {
-					send(write{c.conn}, false)
-				}
-			case close:
-				c := connconn[ev.conn]
-				if c == nil {
-					continue
-				}
-				delete(connconn, c.conn)
-				delete(idconn, c.id)
-				if c.action == Detach {
-					c.detached = true
-					if events.Detached != nil {
-						unlock()
-						c.action = events.Detached(c.id, c.conn)
-						lock()
-						if c.action == Shutdown {
-							send(fail{nil}, false)
-							continue again
-						}
-						continue
-					}
-				}
-				c.conn.Close()
-				if events.Closed != nil {
-					unlock()
-					action := events.Closed(c.id)
-					lock()
-					if action == Shutdown {
-						c.action = Shutdown
-					}
-				}
-				if c.action == Shutdown {
-					send(fail{nil}, false)
-					continue again
-				}
-			case fail:
-				unlock()
-				return ev.err
+				}(id, conn)
 			}
-		}
-		evs = evs[:0]
-		cond.Wait()
+		}(i, ln.ln)
 	}
+	go func() {
+		for {
+			var delay time.Duration
+			var action Action
+			if events.Tick != nil {
+				mu.Lock()
+				delay, action = events.Tick()
+				mu.Unlock()
+			}
+			if action == Shutdown {
+				shutdown(nil)
+				return
+			}
+			time.Sleep(delay)
+		}
+	}()
+	wg.Wait()
+	return ferr
 }
 
 func istimeout(err error) bool {
