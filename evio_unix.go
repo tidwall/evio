@@ -55,37 +55,59 @@ type unixConn struct {
 	outpos    int
 	action    Action
 	opts      Options
+	raddr     net.Addr
+	laddr     net.Addr
+	err       error
 	wake      bool
 	writeon   bool
 	detached  bool
 }
 
 func (c *unixConn) Read(p []byte) (n int, err error) {
-	n, err = syscall.Read(c.fd, p)
-	return
+	return syscall.Read(c.fd, p)
 }
 func (c *unixConn) Write(p []byte) (n int, err error) {
 	if c.detached {
-		c.outbuf = append(c.outbuf, p...)
-		for len(c.outbuf) > 0 {
-			n, err = syscall.Write(c.fd, c.outbuf)
-			if err != nil {
-				return
+		if len(c.outbuf) > 0 {
+			for len(c.outbuf) > 0 {
+				n, err = syscall.Write(c.fd, c.outbuf)
+				if n > 0 {
+					c.outbuf = c.outbuf[n:]
+				}
+				if err != nil {
+					return 0, err
+				}
 			}
-			if n > 0 {
-				c.outbuf = c.outbuf[n:]
-			}
+			c.outbuf = nil
 		}
-		c.outbuf = nil
-	} else {
-		n, err = syscall.Write(c.fd, p)
+		var tn int
+		if len(p) > 0 {
+			for len(p) > 0 {
+				n, err = syscall.Write(c.fd, p)
+				if n > 0 {
+					p = p[n:]
+					tn += n
+				}
+				if err != nil {
+					return tn, err
+				}
+			}
+			p = nil
+		}
+		return tn, nil
 	}
-	return
+	return syscall.Write(c.fd, p)
 }
 func (c *unixConn) Close() error {
 	err := syscall.Close(c.fd)
 	c.fd = 0
 	return err
+}
+func (c *unixConn) LocalAddr() net.Addr {
+	return c.laddr
+}
+func (c *unixConn) RemoteAddr() net.Addr {
+	return c.raddr
 }
 
 func serve(events Events, lns []*listener) error {
@@ -129,10 +151,13 @@ func serve(events Events, lns []*listener) error {
 	}
 	defer func() {
 		lock()
-		type fdid struct{ fd, id int }
+		type fdid struct {
+			fd, id int
+			opts   Options
+		}
 		var fdids []fdid
-		for fd, conn := range fdconn {
-			fdids = append(fdids, fdid{fd, conn.id})
+		for fd, c := range fdconn {
+			fdids = append(fdids, fdid{fd, c.id, c.opts})
 		}
 		sort.Slice(fdids, func(i, j int) bool {
 			return fdids[j].id < fdids[i].id
@@ -141,7 +166,7 @@ func serve(events Events, lns []*listener) error {
 			syscall.Close(fdid.fd)
 			if events.Closed != nil {
 				unlock()
-				events.Closed(fdid.id)
+				events.Closed(fdid.id, nil)
 				lock()
 			}
 		}
@@ -208,11 +233,11 @@ func serve(events Events, lns []*listener) error {
 			c = &unixConn{id: id, fd: nfd, p: p}
 			fdconn[nfd] = c
 			idconn[id] = c
+			c.laddr = getlocaladdr(fd, ln.ln)
+			c.raddr = getaddr(sa, ln.ln)
 			if events.Opened != nil {
-				laddr := getlocaladdr(fd, ln.ln)
-				raddr := getaddr(sa, ln.ln)
 				unlock()
-				out, c.opts, c.action = events.Opened(c.id, Addr{lnidx, laddr, raddr})
+				out, c.opts, c.action = events.Opened(c.id, Addr{lnidx, c.laddr, c.raddr})
 				lock()
 				if c.opts.TCPKeepAlive > 0 {
 					if _, ok := ln.ln.(*net.TCPListener); ok {
@@ -222,9 +247,6 @@ func serve(events Events, lns []*listener) error {
 					}
 				}
 				if len(out) > 0 {
-					if events.TranslateOut != nil {
-						out = events.TranslateOut(c.id, out)
-					}
 					c.outbuf = append(c.outbuf, out...)
 				}
 			}
@@ -241,12 +263,10 @@ func serve(events Events, lns []*listener) error {
 					if err == syscall.EAGAIN {
 						goto write
 					}
+					c.err = err
 					goto close
 				}
 				in = append([]byte{}, packet[:n]...)
-				if events.TranslateIn != nil {
-					in = events.TranslateIn(c.id, in)
-				}
 			}
 			if events.Data != nil {
 				unlock()
@@ -254,9 +274,6 @@ func serve(events Events, lns []*listener) error {
 				lock()
 			}
 			if len(out) > 0 {
-				if events.TranslateOut != nil {
-					out = events.TranslateOut(c.id, out)
-				}
 				c.outbuf = append(c.outbuf, out...)
 			}
 			goto write
@@ -293,6 +310,7 @@ func serve(events Events, lns []*listener) error {
 						}
 						goto next
 					}
+					c.err = err
 					goto close
 				}
 				c.outpos += n
@@ -344,7 +362,7 @@ func serve(events Events, lns []*listener) error {
 			syscall.Close(c.fd)
 			if events.Closed != nil {
 				unlock()
-				action := events.Closed(c.id)
+				action := events.Closed(c.id, c.err)
 				lock()
 				if action == Shutdown {
 					c.action = Shutdown

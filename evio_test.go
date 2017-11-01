@@ -240,7 +240,6 @@ func testTick(addr string, stdlib bool) {
 		panic("bad ticker timing")
 	}
 }
-
 func TestDetach(t *testing.T) {
 	testDetach(":54231", false)
 	testDetach(":54231", true)
@@ -256,9 +255,9 @@ func testDetach(addr string, stdlib bool) {
 	}
 	expected := "detached\r\n"
 	var done int64
-	events.Detached = func(id int, rwc io.ReadWriteCloser) (action Action) {
+	events.Detached = func(id int, conn io.ReadWriteCloser) (action Action) {
 		go func() {
-			n, err := rwc.Write([]byte(expected))
+			n, err := conn.Write([]byte(expected))
 			must(err)
 			if n != len(expected) {
 				panic("not enough data written")

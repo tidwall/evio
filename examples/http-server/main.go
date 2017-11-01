@@ -1,8 +1,12 @@
 package main
 
 import (
+	"crypto/tls"
+	"flag"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -23,11 +27,34 @@ type conn struct {
 }
 
 func main() {
+
+	var pem string
+	var port int
+	flag.StringVar(&pem, "tls", "", "tls pem file")
+	flag.IntVar(&port, "port", 8080, "server port")
+	flag.Parse()
+
+	if pem != "" && os.Getenv("GONET") == "1" {
+		http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+			w.Write([]byte("Hello World!\n"))
+		})
+		go log.Printf("compat http server started on port %d", port)
+		err := http.ListenAndServeTLS(fmt.Sprintf(":%d", port), pem, pem, nil)
+		if err != nil {
+			log.Fatal("ListenAndServe: ", err)
+		}
+		return
+	}
+
 	var events evio.Events
 	var conns = make(map[int]*conn)
 
 	events.Serving = func(wakefn func(id int) bool) (action evio.Action) {
-		log.Print("http server started on port 8080")
+		log.Printf("http server started on port %d", port)
+		if pem != "" {
+			log.Printf("tls enabled")
+		}
+
 		return
 	}
 
@@ -37,14 +64,22 @@ func main() {
 		return
 	}
 
-	events.Closed = func(id int) (action evio.Action) {
+	events.Closed = func(id int, err error) (action evio.Action) {
 		c := conns[id]
-		log.Printf("%s: closed", c.addr.Remote.String())
+		log.Printf("%s: closed: %v", c.addr.Remote.String(), err)
 		delete(conns, id)
 		return
 	}
 
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
+		if in == nil {
+			return
+		}
+		// if in == nil {
+		// 	fmt.Printf(">> IN B: <nil>\n")
+		// } else {
+		// 	fmt.Printf(">> IN B: [%s]\n", in)
+		// }
 		c := conns[id]
 		data := c.is.Begin(in)
 		// process the pipeline
@@ -68,7 +103,16 @@ func main() {
 		c.is.End(data)
 		return
 	}
-	log.Fatal(evio.Serve(events, "tcp://0.0.0.0:8080"))
+
+	if pem != "" {
+		cer, err := tls.LoadX509KeyPair(pem, pem)
+		if err != nil {
+			log.Fatal(err)
+		}
+		config := &tls.Config{Certificates: []tls.Certificate{cer}}
+		events = evio.TLS(events, config)
+	}
+	log.Fatal(evio.Serve(events, fmt.Sprintf("tcp://:%d", port)))
 }
 
 // appendhandle handles the incoming request and appends the response to

@@ -26,9 +26,6 @@ const (
 type Options struct {
 	// TCPKeepAlive (SO_KEEPALIVE) socket option.
 	TCPKeepAlive time.Duration
-
-	OutRd io.Reader
-	OutWr io.Writer
 }
 
 // Addr represents the connection's remote and local addresses.
@@ -55,7 +52,7 @@ type Events struct {
 	// The opts return value is used to set connection options.
 	Opened func(id int, addr Addr) (out []byte, opts Options, action Action)
 	// Opened fires when a connection is closed.
-	Closed func(id int) (action Action)
+	Closed func(id int, err error) (action Action)
 	// Detached fires when a connection has been previously detached.
 	// Once detached it's up to the receiver of this event to manage the
 	// state of the connection. The Closed event will not be called for
@@ -63,7 +60,7 @@ type Events struct {
 	// The conn parameter is a ReadWriteCloser that represents the
 	// underlying socket connection. It can be freely used in goroutines
 	// and should be closed when no longer needed.
-	Detached func(id int, conn io.ReadWriteCloser) (action Action)
+	Detached func(id int, rwc io.ReadWriteCloser) (action Action)
 	// Data fires when a connection sends the server data.
 	// The in parameter is the incoming data.
 	// Use the out return value to write data to the connection.
@@ -81,9 +78,6 @@ type Events struct {
 	// Tick fires immediately after the server starts and will fire again
 	// following the duration specified by the delay return value.
 	Tick func() (delay time.Duration, action Action)
-
-	TranslateIn  func(id int, in []byte) []byte
-	TranslateOut func(id int, out []byte) []byte
 }
 
 // Serve starts handling events for the specified addresses.
