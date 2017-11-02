@@ -60,19 +60,18 @@ func NopConn(rw io.ReadWriter) net.Conn {
 	return &nopConn{rw}
 }
 
-// Translate provides a utility for performing byte level translation
-// on the input and output streams for a connection. This is useful for
-// things like compression, encryption, TLS, etc. The function wraps
-// existing events and returns new events that manage the translation.
-// The `should` parameter is an optional function that can be used to
-// ignore or accept the translation for a specific connection.
-// The `translate` parameter is a function that provides a ReadWriter
-// for each new connection and returns a ReadWriter that performs the
-// actual translation.
+// Translate provides a utility for performing byte level translation on the
+// input and output streams for a connection. This is useful for things like
+// compression, encryption, TLS, etc. The function wraps existing events and
+// returns new events that manage the translation. The `should` parameter is
+// an optional function that can be used to ignore or accept the translation
+// for a specific connection. The `translate` parameter is a function that
+// provides a ReadWriter for each new connection and returns a ReadWriter
+// that performs the actual translation.
 func Translate(
 	events Events,
 	should func(id int, addr Addr) bool,
-	translate func(rd io.ReadWriter) io.ReadWriter,
+	translate func(id int, rd io.ReadWriter) io.ReadWriter,
 ) Events {
 	tevents := events
 	var wake func(id int) bool
@@ -94,7 +93,7 @@ func Translate(
 		}
 		idc[id] = c
 		mu.Unlock()
-		tc := translate(c)
+		tc := translate(id, c)
 		for st := 0; st < 2; st++ {
 			c.rd[st], c.wr[st] = io.Pipe()
 			var rd io.Reader

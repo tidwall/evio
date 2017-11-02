@@ -5,6 +5,8 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
 	"net"
 	"strings"
@@ -19,25 +21,31 @@ type conn struct {
 }
 
 func main() {
+	var port int
+	var unixsocket string
+	flag.IntVar(&port, "port", 6380, "server port")
+	flag.StringVar(&unixsocket, "unixsocket", "socket", "unix socket")
+	flag.Parse()
+
 	var conns = make(map[int]*conn)
 	var keys = make(map[string]string)
 	var events evio.Events
 	events.Serving = func(wake func(id int) bool, addrs []net.Addr) (action evio.Action) {
-		log.Printf("serving at tcp port 6380")
-		log.Printf("serving on unix socket")
+		log.Printf("redis server started on port %d", port)
+		if unixsocket != "" {
+			log.Printf("redis server started at %s", unixsocket)
+		}
 		return
 	}
 	events.Opened = func(id int, addr evio.Addr) (out []byte, opts evio.Options, action evio.Action) {
 		conns[id] = &conn{}
 		return
 	}
-
 	events.Closed = func(id int, err error) (action evio.Action) {
 		delete(conns, id)
 		return
 	}
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
-
 		c := conns[id]
 		data := c.is.Begin(in)
 		var n int
@@ -45,7 +53,6 @@ func main() {
 		var err error
 		var args [][]byte
 		for action == evio.None {
-
 			complete, args, _, data, err = redcon.ReadNextCommand(data, args[:0])
 			if err != nil {
 				action = evio.Close
@@ -123,7 +130,11 @@ func main() {
 		c.is.End(data)
 		return
 	}
-	err := evio.Serve(events, "tcp://0.0.0.0:6380", "unix://socket")
+	addrs := []string{fmt.Sprintf("tcp://0.0.0.0:%d", port)}
+	if unixsocket != "" {
+		addrs = append(addrs, fmt.Sprintf("unix://%s", unixsocket))
+	}
+	err := evio.Serve(events, addrs...)
 	if err != nil {
 		log.Fatal(err)
 	}

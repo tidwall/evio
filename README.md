@@ -160,7 +160,7 @@ config := &tls.Config{Certificates: []tls.Certificate{cer}}
 // wrap the events with a TLS translator
 
 events = evio.Translate(events, nil, 
-	func(rw io.ReadWriter) io.ReadWriter {
+	func(id int, rw io.ReadWriter) io.ReadWriter {
 		return tls.Server(evio.NopConn(rw), config)
 	},
 )
@@ -192,7 +192,7 @@ Please check out the [examples](examples) subdirectory for a simplified [redis](
 
 To run an example:
 
-```bash
+```sh
 $ go run examples/http-server/main.go
 $ go run examples/redis-server/main.go
 $ go run examples/echo-server/main.go
@@ -204,9 +204,10 @@ The benchmarks below use pipelining which allows for combining multiple Redis co
 
 **Real Redis**
 
-```
+```sh
 $ redis-server
 ```
+
 ```
 redis-benchmark -p 6379 -t ping,set,get -q -P 32
 PING_INLINE: 869565.19 requests per second
@@ -217,9 +218,10 @@ GET: 1265822.75 requests per second
 
 **Redis clone (evio)**
 
-```
+```sh
 $ go run examples/redis-server/main.go
 ```
+
 ```
 redis-benchmark -p 6380 -t ping,set,get -q -P 32
 PING_INLINE: 2380952.50 requests per second

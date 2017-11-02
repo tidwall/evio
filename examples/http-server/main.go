@@ -18,6 +18,8 @@ import (
 	"github.com/tidwall/evio"
 )
 
+var res string
+
 type request struct {
 	proto, method string
 	path, query   string
@@ -34,11 +36,19 @@ func main() {
 	var port int
 	var tlsport int
 	var tlspem string
+	var aaaa bool
 
 	flag.IntVar(&port, "port", 8080, "server port")
 	flag.IntVar(&tlsport, "tlsport", 4443, "tls port")
 	flag.StringVar(&tlspem, "tlscert", "", "tls pem cert/key file")
+	flag.BoolVar(&aaaa, "aaaa", false, "aaaaa....")
 	flag.Parse()
+
+	if aaaa {
+		res = strings.Repeat("a", 1024)
+	} else {
+		res = "Hello World!\r\n"
+	}
 
 	var events evio.Events
 	var conns = make(map[int]*conn)
@@ -65,6 +75,16 @@ func main() {
 	}
 
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
+		// 		out = []byte(`HTTP/1.1 200 OK
+		// Server: evio
+		// Date: Thu, 02 Nov 2017 15:48:57 GMT
+		// Content-Type: text/plain; charset=utf-8
+		// Content-Length: 1024
+
+		// aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`)
+
+		// 		return
+
 		if in == nil {
 			return
 		}
@@ -92,9 +112,8 @@ func main() {
 		return
 	}
 	// We at least want the single http address.
-	addrs := []string{fmt.Sprintf("tcp://:%d", port)}
+	addrs := []string{fmt.Sprintf("tcp://localhost:%d", port)}
 	if tlspem != "" {
-
 		// load the cert and key pair from the concat'd pem file.
 		cer, err := tls.LoadX509KeyPair(tlspem, tlspem)
 		if err != nil {
@@ -102,7 +121,7 @@ func main() {
 		}
 		config := &tls.Config{Certificates: []tls.Certificate{cer}}
 		// Update the address list to include https.
-		addrs = append(addrs, fmt.Sprintf("tcp://:%d", tlsport))
+		addrs = append(addrs, fmt.Sprintf("tcp://localhost:%d", tlsport))
 
 		// TLS translate the events
 		events = evio.Translate(events,
@@ -110,7 +129,7 @@ func main() {
 				// only translate for the second address.
 				return addr.Index == 1
 			},
-			func(rw io.ReadWriter) io.ReadWriter {
+			func(id int, rw io.ReadWriter) io.ReadWriter {
 				// Use the standard Go crypto/tls package and create a tls.Conn
 				// from the provided io.ReadWriter. Here we use the handy
 				// evio.NopConn utility to create a barebone net.Conn in order
@@ -126,7 +145,7 @@ func main() {
 // appendhandle handles the incoming request and appends the response to
 // the provided bytes, which is then returned to the caller.
 func appendhandle(b []byte, req *request) []byte {
-	return appendresp(b, "200 OK", "", "Hello World!\n")
+	return appendresp(b, "200 OK", "", res)
 }
 
 // appendresp will append a valid http response to the provide bytes.
@@ -137,6 +156,7 @@ func appendresp(b []byte, status, head, body string) []byte {
 	b = append(b, ' ')
 	b = append(b, status...)
 	b = append(b, '\r', '\n')
+	b = append(b, "Server: evio\r\n"...)
 	b = append(b, "Date: "...)
 	b = time.Now().AppendFormat(b, "Mon, 02 Jan 2006 15:04:05 GMT")
 	b = append(b, '\r', '\n')
@@ -157,51 +177,64 @@ func appendresp(b []byte, status, head, body string) []byte {
 // waits for the entire payload to be buffered before returning a
 // valid request.
 func parsereq(data []byte, req *request) (leftover []byte, err error) {
-	var s int
-	var n int
+	sdata := string(data)
+	var i, s int
 	var top string
 	var clen int
-	var i int
-	for ; i < len(data); i++ {
-		if i > 1 && data[i] == '\n' && data[i-1] == '\r' {
-			line := string(data[s : i-1])
-			s = i + 1
-			if n == 0 {
-				top = line
-				parts := strings.Split(top, " ")
-				if len(parts) != 3 {
-					return data, fmt.Errorf("malformed request '%s'", top)
-				}
-				req.method = parts[0]
-				req.path = parts[1]
-				req.proto = parts[2]
-				for i := 0; i < len(req.path); i++ {
-					if req.path[i] == '?' {
-						req.query = req.path[i+1:]
-						req.path = req.path[:i]
-						break
+	var q = -1
+	// method, path, proto line
+	for ; i < len(sdata); i++ {
+		if sdata[i] == ' ' {
+			req.method = sdata[s:i]
+			for i, s = i+1, i+1; i < len(sdata); i++ {
+				if sdata[i] == '?' && q == -1 {
+					q = i - s
+				} else if sdata[i] == ' ' {
+					if q != -1 {
+						req.path = sdata[s:q]
+						req.query = req.path[q+1 : i]
+					} else {
+						req.path = sdata[s:i]
 					}
+					for i, s = i+1, i+1; i < len(sdata); i++ {
+						if sdata[i] == '\n' && sdata[i-1] == '\r' {
+							req.proto = sdata[s:i]
+							i, s = i+1, i+1
+							break
+						}
+					}
+					break
 				}
-			} else if line == "" {
-				req.head = string(data[len(top)+2 : i+1])
+			}
+			break
+		}
+	}
+	if req.proto == "" {
+		return data, fmt.Errorf("malformed request")
+	}
+	top = sdata[:s]
+	for ; i < len(sdata); i++ {
+		if i > 1 && sdata[i] == '\n' && sdata[i-1] == '\r' {
+			line := sdata[s : i-1]
+			s = i + 1
+			if line == "" {
+				req.head = sdata[len(top)+2 : i+1]
 				i++
 				if clen > 0 {
-					if len(data[i:]) < clen {
+					if len(sdata[i:]) < clen {
 						break
 					}
-					req.body = string(data[i : i+clen])
+					req.body = sdata[i : i+clen]
 					i += clen
 				}
 				return data[i:], nil
-			} else {
-				if strings.HasPrefix(line, "Content-Length:") {
-					n, err := strconv.ParseInt(strings.TrimSpace(line[len("Content-Length:"):]), 10, 64)
-					if err == nil {
-						clen = int(n)
-					}
+			}
+			if strings.HasPrefix(line, "Content-Length:") {
+				n, err := strconv.ParseInt(strings.TrimSpace(line[len("Content-Length:"):]), 10, 64)
+				if err == nil {
+					clen = int(n)
 				}
 			}
-			n++
 		}
 	}
 	// not enough data
