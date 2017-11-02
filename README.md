@@ -105,10 +105,12 @@ events.Tick = func() (delay time.Duration, action Action){
 
 A connection can be woken up using the `wake` function that is made available through the `Serving` event. This is useful for when you need to offload an operation to a background goroutine and then later notify the event loop that it's time to send some data.
 
+Example echo server that when it encounters the line "exec" it waits 5 seconds before responding.
+
 ```go
 var wake func(id int) bool
 var mu sync.Mutex
-var done = make(map[int]bool)
+var execs = make(map[int]int)
 
 events.Serving = func(wakefn func(id int) bool, addrs []net.Addr) (action evio.Action) {
 	wake = wakefn // hang on to the wake function
@@ -118,8 +120,9 @@ events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 	if in == nil {
 		// look for `in` param equal to `nil` following a wake call.
 		mu.Lock()
-		if done[id]{
-			out = []byte("done\r\n")
+		for execs[id] > 0 {
+			out = append(out, "exec\r\n"...)
+			execs[id]--
 		}
 		mu.Unlock()
 	} else if string(in) == "exec\r\n" {
@@ -127,7 +130,7 @@ events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 			// do some long running operation
 			time.Sleep(time.Second*5)
 			mu.Lock()
-			done[id] = true
+			execs[id]++
 			mu.Unlock()
 			wake(id)
 		}()
@@ -140,7 +143,7 @@ events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 
 ### Data translations
 
-The `Translate` function is utility that wraps events and provides a `ReadWriter` that's used to translate data off the wire from one format to another. This can be useful for transparently adding compression or encryption.
+The `Translate` function is utility that wraps events and provides a `ReadWriter` which used to translate data off the wire from one format to another. This can be useful for transparently adding compression or encryption.
 
 For example, let's say we need TLS support:
 
