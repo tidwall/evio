@@ -105,7 +105,7 @@ events.Tick = func() (delay time.Duration, action Action){
 
 A connection can be woken up using the `wake` function that is made available through the `Serving` event. This is useful for when you need to offload an operation to a background goroutine and then later notify the event loop that it's time to send some data.
 
-Example echo server that when it encounters the line "exec" it waits 5 seconds before responding.
+Example echo server that when encountering the line "exec" it waits 5 seconds before responding.
 
 ```go
 var wake func(id int) bool
