@@ -14,7 +14,7 @@ The goal of this project is to create a server framework for Go that performs on
 
 ## Features
 
-- Very fast single-threaded design
+- Very fast single-threaded event loop design
 - Simple API. Only one entrypoint and eight events
 - Low memory usage
 - Supports tcp4, tcp6, and unix sockets
