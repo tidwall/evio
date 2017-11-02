@@ -36,7 +36,7 @@ This will retrieve the library.
 
 ### Usage
 
-Calling `Serve` will start the event loop:
+The Serve function is defined as:
 
 ```go
 // Serve starts handling events for the specified addresses.
@@ -44,7 +44,7 @@ Calling `Serve` will start the event loop:
 // Addresses should use a scheme prefix and be formatted
 // like `tcp://192.168.0.10:9851` or `unix://socket`.
 // Valid network schemes:
-//	tcp   - bind to both IPv4 and IPv6
+//  tcp   - bind to both IPv4 and IPv6
 //  tcp4  - IPv4
 //  tcp6  - IPv6
 //  unix  - Unix Domain Socket
