@@ -171,7 +171,7 @@ log.Fatal(Serve(events, "tcp://0.0.0.0:443"))
 
 Here we wrapped the event with a TLS translator. The `evio.NopConn` function is used to converts the `ReadWriter` a `net.Conn` so the `tls.Server()` call will work.
 
-There's a working TLS example at [examples/http-server/main.go](examples/http-server/main.go) that will bind to port 8080 and 4443 using an developer SSL certificate. The 8080 connections will be insecure and the 4443 will be secure.
+There's a working TLS example at [examples/http-server/main.go](examples/http-server/main.go) that binds to port 8080 and 4443 using an developer SSL certificate. The 8080 connections will be insecure and the 4443 will be secure.
 
 ```sh
 $ cd examples/http-server
