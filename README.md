@@ -78,7 +78,7 @@ The event type has a bunch of handy events:
 - `Data` fires when the server receives new data from a connection.
 - `Prewrite` fires prior to all write attempts from the server.
 - `Postwrite` fires immediately after every write attempt.
-- `Tick` fires immediately after the server starts and will fire again after the amount of time specified by the `delay` return value.
+- `Tick` fires immediately after the server starts and will fire again after a specified interval.
 
 ### Multiple addresses
 
