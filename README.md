@@ -57,8 +57,8 @@ func main() {
 }
 ```
 
-The only event being used is `Data`, which fires when the server receives input data from a client.
-The exact same input data is then being returned through the output return value, which is sent back to the client. 
+Here the only event being used is `Data`, which fires when the server receives input data from a client.
+The exact same input data is then passed through the output return value, which is sent back to the client. 
 
 Connect to the echo server:
 
@@ -66,98 +66,108 @@ Connect to the echo server:
 $ telnet localhost 5000
 ```
 
+### Events
 
+The event type has a bunch of handy events:
 
-
-
-
-The Events type is defined as:
-
-```go
-// Events represents the server events for the Serve call.
-// Each event has an Action return value that is used manage the state
-// of the connection and server.
-type Events struct {
-	// Serving fires when the server can accept connections.
-	// The wake parameter is a goroutine-safe function that triggers
-	// a Data event (with a nil `in` parameter) for the specified id.
-	// The addrs parameter is an array of listening addresses that align
-	// with the addr strings passed to the Serve function.
-	Serving func(wake func(id int) bool, addrs []net.Addr) (action Action)
-	// Opened fires when a new connection has opened.
-	// The addr parameter is the connection's local and remote addresses.
-	// Use the out return value to write data to the connection.
-	// The opts return value is used to set connection options.
-	Opened func(id int, addr Addr) (out []byte, opts Options, action Action)
-	// Opened fires when a connection has closed.
-	// The err parameter is the last known connection error, usually nil.
-	Closed func(id int, err error) (action Action)
-	// Detached fires when a connection has been previously detached.
-	// Once detached it's up to the receiver of this event to manage the
-	// state of the connection. The Closed event will not be called for
-	// this connection.
-	// The conn parameter is a ReadWriteCloser that represents the
-	// underlying socket connection. It can be freely used in goroutines
-	// and should be closed when it's no longer needed.
-	Detached func(id int, rwc io.ReadWriteCloser) (action Action)
-	// Data fires when a connection sends the server data.
-	// The in parameter is the incoming data.
-	// Use the out return value to write data to the connection.
-	Data func(id int, in []byte) (out []byte, action Action)
-	// Prewrite fires prior to every write attempt.
-	// The amount parameter is the number of bytes that will be attempted
-	// to be written to the connection.
-	Prewrite func(id int, amount int) (action Action)
-	// Postwrite fires immediately after every write attempt.
-	// The amount parameter is the number of bytes that was written to the
-	// connection.
-	// The remaining parameter is the number of bytes that still remain in
-	// the buffer scheduled to be written.
-	Postwrite func(id int, amount, remaining int) (action Action)
-	// Tick fires immediately after the server starts and will fire again
-	// following the duration specified by the delay return value.
-	Tick func() (delay time.Duration, action Action)
-}
-```
-
-- All events are executed in the same thread as the `Serve` call.
-- The `wake` function is there to wake up the event loop from a background goroutine. This is useful for when you need to perform a long-running operation that must send data back to a client after the operation is completed, but without blocking the server. A call to `wake` fires a `Data` event providing an opening to write data to the client. The `in` param of the `Data` event is `nil` for wakeups.
-- `Data`, `Opened`, `Closed`, `Prewrite`, and `Postwrite` events have an `id` param which is a unique number assigned to the client socket.
-- `in` represents an input network packet from a client, and `out` is output data sent to the client.
-- The `Action` return value allows for closing or detaching a connection, or shutting down the server.
-
-
-## Example - Simple echo server
-
-```
-package main
-
-import "github.com/tidwall/evio"
-
-func main() {
-	var events evio.Events
-	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
-		out = in
-		return
-	}
-	if err := evio.Serve(events, "tcp://localhost:5000"); err != nil {
-		println(err.Error())
-	}
-}
-```
-
-Connect to the server:
-
-```
-$ telnet localhost 5000
-```
+- `Serving` fires when the server is ready to accept new connections.
+- `Opened` fires when a connection has opened.
+- `Closed` fires when a connection has closed.
+- `Detach` fires when a connection has been detached using the `Detach` return action.
+- `Data` fires when the server receives new data from a connection.
+- `Prewrite` fires prior to all write attempts from the server.
+- `Postwrite` fires immediately after every write attempt.
+- `Tick` fires immediately after the server starts and will fire again after the amount of time specified by the `delay` return value.
 
 ### Multiple addresses
 
-You can bind to multiple address and share the same event loop.
+An server can bind to multiple addresses and share the same event loop.
 
 ```go
 evio.Serve(events, "tcp://192.168.0.10:5000", "unix://socket")
+```
+
+### Wake up
+
+A connection can be woken up using the `wake` function that is made available through the `Serving` event. This is useful for when you need to offload an operation to a background goroutine and then later notify the event loop that it's time to send some data.
+
+```go
+var wake func(id int) bool
+var mu sync.Mutex
+var done = make(map[int]bool)
+
+events.Serving = func(wakefn func(id int) bool, addrs []net.Addr) (action evio.Action) {
+	wake = wakefn // hang on to the wake function
+	return
+}
+events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
+	if in == nil {
+		// look for `in` param equal to `nil` following a wake call.
+		mu.Lock()
+		if done[id]{
+			out = []byte("done\r\n")
+		}
+		mu.Unlock()
+	} else if string(in) == "exec\r\n" {
+		go func(){
+			// do some long running operation
+			time.Sleep(time.Second*5)
+			mu.Lock()
+			done[id] = true
+			mu.Unlock()
+			wake(id)
+		}()
+	} else {
+		out = in
+	}
+	return
+}
+```
+
+### Data translations
+
+The `Translate` function is utility that wraps events and provides a `ReadWriter` that's used to translate data off the wire from one format to another. This can be useful for transparently adding compression or encryption.
+
+For example, let's say we need TLS support:
+
+```go
+var events Events
+
+// ... fill the events with happy functions
+
+cer, err := tls.LoadX509KeyPair("certs/ssl-cert-snakeoil.pem", "certs/ssl-cert-snakeoil.key")
+if err != nil {
+	log.Fatal(err)
+}
+config := &tls.Config{Certificates: []tls.Certificate{cer}}
+
+// wrap the events with a TLS translator
+
+events = evio.Translate(events, nil, 
+	func(rw io.ReadWriter) io.ReadWriter {
+		return tls.Server(evio.NopConn(rw), config)
+	},
+)
+
+log.Fatal(Serve(events, "tcp://0.0.0.0:443"))
+```
+
+Here we wrapped the event with a TLS translator. The `evio.NopConn` function is used to converts the `ReadWriter` a `net.Conn` so the `tls.Server` will work.
+
+There's a working TLS example at [examples/http-server/main.go](examples/http-server/main.go) that will bind to port 8080 and 4443 using an developer SSL certificate. The 8080 connections will be insecure and the 4443 will be secure.
+
+```sh
+$ cd examples/http-server
+$ go run main.go --tlscert example.pem
+2017/11/02 06:24:33 http server started on port 8080
+2017/11/02 06:24:33 https server started on port 4443
+```
+
+```sh
+$ curl http://localhost:8080
+Hello World!
+$ curl -k https://localhost:4443
+Hello World!
 ```
 
 ## More examples
@@ -168,6 +178,8 @@ To run an example:
 
 ```bash
 $ go run examples/http-server/main.go
+$ go run examples/redis-server/main.go
+$ go run examples/echo-server/main.go
 ```
 
 ## Performance
