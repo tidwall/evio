@@ -14,12 +14,12 @@ The goal of this project is to create a server framework for Go that performs on
 
 ## Features
 
-- Very fast single-threaded event loop design
+- [Very fast](#performance) single-threaded event loop
 - Simple API
 - Low memory usage
 - Supports tcp4, tcp6, and unix sockets
-- Allows multiple network binding on the same event loop
-- Flexible ticker event
+- Allows [multiple network binding](#multiple-addresses) on the same event loop
+- Flexible [ticker](#ticker) event
 - Fallback for non-epoll/kqueue operating systems by simulating events with the [net](https://golang.org/pkg/net/) package.
 
 ## Getting Started
@@ -85,6 +85,19 @@ An server can bind to multiple addresses and share the same event loop.
 
 ```go
 evio.Serve(events, "tcp://192.168.0.10:5000", "unix://socket")
+```
+
+### Ticker
+
+The `Tick` event fires ticks at a specified interval. 
+The first tick fires immediately after the `Serving` events.
+
+```go
+events.Tick = func() (delay time.Duration, action Action){
+	log.Printf("tick")
+	delay = time.Second
+	return
+}
 ```
 
 ### Wake up
