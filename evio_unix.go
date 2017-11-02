@@ -61,6 +61,7 @@ type unixConn struct {
 	wake      bool
 	writeon   bool
 	detached  bool
+	closed    bool
 }
 
 func (c *unixConn) Read(p []byte) (n int, err error) {
@@ -99,8 +100,12 @@ func (c *unixConn) Write(p []byte) (n int, err error) {
 	return syscall.Write(c.fd, p)
 }
 func (c *unixConn) Close() error {
+	if c.closed {
+		return syscall.EINVAL
+	}
 	err := syscall.Close(c.fd)
-	c.fd = 0
+	c.fd = -1
+	c.closed = true
 	return err
 }
 
