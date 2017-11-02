@@ -53,7 +53,8 @@ type Events struct {
 	// Use the out return value to write data to the connection.
 	// The opts return value is used to set connection options.
 	Opened func(id int, addr Addr) (out []byte, opts Options, action Action)
-	// Opened fires when a connection is closed.
+	// Opened fires when a connection has closed.
+	// The err parameter is the last known connection error, usually nil.
 	Closed func(id int, err error) (action Action)
 	// Detached fires when a connection has been previously detached.
 	// Once detached it's up to the receiver of this event to manage the
@@ -61,7 +62,7 @@ type Events struct {
 	// this connection.
 	// The conn parameter is a ReadWriteCloser that represents the
 	// underlying socket connection. It can be freely used in goroutines
-	// and should be closed when no longer needed.
+	// and should be closed when it's no longer needed.
 	Detached func(id int, rwc io.ReadWriteCloser) (action Action)
 	// Data fires when a connection sends the server data.
 	// The in parameter is the incoming data.
