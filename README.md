@@ -58,7 +58,7 @@ func main() {
 ```
 
 Here the only event being used is `Data`, which fires when the server receives input data from a client.
-The exact same input data is then passed through the output return value, which is sent back to the client. 
+The exact same input data is then passed through the output return value, which is then sent back to the client. 
 
 Connect to the echo server:
 
