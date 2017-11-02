@@ -10,17 +10,17 @@
 
 `evio` is an event driven networking framework that is fast and small. It makes direct [epoll](https://en.wikipedia.org/wiki/Epoll) and [kqueue](https://en.wikipedia.org/wiki/Kqueue) syscalls rather than the standard Go [net](https://golang.org/pkg/net/) package. It works in a similar manner as [libuv](https://github.com/libuv/libuv) and [libevent](https://github.com/libevent/libevent).
 
-The goal of this project is to create a server framework for Go that performs on par with [Redis](http://redis.io) and [Haproxy](http://www.haproxy.org) for packet handling, but without having to interop with Cgo. My hope is to use this as a foundation for [Tile38](https://github.com/tidwall/tile38) and a future L7 proxy for Go.
+The goal of this project is to create a server framework for Go that performs on par with [Redis](http://redis.io) and [Haproxy](http://www.haproxy.org) for packet handling. My hope is to use this as a foundation for [Tile38](https://github.com/tidwall/tile38) and a future L7 proxy for Go... and a bunch of other stuff.
 
 ## Features
 
 - Very fast single-threaded event loop design
-- Simple API. Only one entrypoint and eight events
+- Simple API
 - Low memory usage
 - Supports tcp4, tcp6, and unix sockets
 - Allows multiple network binding on the same event loop
-- Has a flexible ticker event
-- Support for non-epoll/kqueue operating systems by simulating events with the net package.
+- Flexible ticker event
+- Fallback for non-epoll/kqueue operating systems by simulating events with the [net](https://golang.org/pkg/net/) package.
 
 ## Getting Started
 
@@ -36,22 +36,40 @@ This will retrieve the library.
 
 ### Usage
 
-The Serve function is defined as:
+Starting a server is easy with `evio`. Just set up your events and pass them to the `Serve` function along with the binding address(es). Each connections receives an ID that's passed to various events to differentiate the clients. At any point you can close a client or shutdown the server by return a `Close` or `Shutdown` action from an event.
+
+Example echo server that binds to port 5000:
 
 ```go
-// Serve starts handling events for the specified addresses.
-//
-// Addresses should use a scheme prefix and be formatted
-// like `tcp://192.168.0.10:9851` or `unix://socket`.
-// Valid network schemes:
-//  tcp   - bind to both IPv4 and IPv6
-//  tcp4  - IPv4
-//  tcp6  - IPv6
-//  unix  - Unix Domain Socket
-//
-// The "tcp" network scheme is assumed when one is not specified.
-func Serve(events Events, addr ...string) error
+package main
+
+import "github.com/tidwall/evio"
+
+func main() {
+	var events evio.Events
+	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
+		out = in
+		return
+	}
+	if err := evio.Serve(events, "tcp://localhost:5000"); err != nil {
+		panic(err.Error())
+	}
+}
 ```
+
+The only event being used is `Data`, which fires when the server receives input data from a client.
+The exact same input data is then being returned through the output return value, which is sent back to the client. 
+
+Connect to the echo server:
+
+```sh
+$ telnet localhost 5000
+```
+
+
+
+
+
 
 The Events type is defined as:
 
