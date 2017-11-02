@@ -143,7 +143,7 @@ events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 
 ### Data translations
 
-The `Translate` function is utility that wraps events and provides a `ReadWriter` which used to translate data off the wire from one format to another. This can be useful for transparently adding compression or encryption.
+The `Translate` function wraps events and provides a `ReadWriter` that can be used to translate data off the wire from one format to another. This can be useful for transparently adding compression or encryption.
 
 For example, let's say we need TLS support:
 
