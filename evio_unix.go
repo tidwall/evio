@@ -35,7 +35,7 @@ func (ln *listener) system() error {
 	switch netln := ln.ln.(type) {
 	default:
 		ln.close()
-		return errors.New("invalid listener type")
+		return errors.New("network not supported")
 	case *net.TCPListener:
 		ln.f, err = netln.File()
 	case *net.UnixListener:
@@ -103,12 +103,6 @@ func (c *unixConn) Close() error {
 	c.fd = 0
 	return err
 }
-func (c *unixConn) LocalAddr() net.Addr {
-	return c.laddr
-}
-func (c *unixConn) RemoteAddr() net.Addr {
-	return c.raddr
-}
 
 func serve(events Events, lns []*listener) error {
 	p, err := internal.MakePoll()
@@ -144,7 +138,11 @@ func serve(events Events, lns []*listener) error {
 		return ok
 	}
 	if events.Serving != nil {
-		switch events.Serving(wake) {
+		addrs := make([]net.Addr, len(lns))
+		for i, ln := range lns {
+			addrs[i] = ln.naddr
+		}
+		switch events.Serving(wake, addrs) {
 		case Shutdown:
 			return nil
 		}
@@ -389,25 +387,23 @@ func getlocaladdr(fd int, ln net.Listener) net.Addr {
 
 func getaddr(sa syscall.Sockaddr, ln net.Listener) net.Addr {
 	switch ln.(type) {
-	default:
-		return nil
 	case *net.UnixListener:
 		return ln.Addr()
 	case *net.TCPListener:
 		var addr net.TCPAddr
 		switch sa := sa.(type) {
-		default:
-			return nil
 		case *syscall.SockaddrInet4:
 			addr.IP = net.IP(sa.Addr[:])
 			addr.Port = sa.Port
+			return &addr
 		case *syscall.SockaddrInet6:
 			addr.IP = net.IP(sa.Addr[:])
 			addr.Port = sa.Port
 			if sa.ZoneId != 0 {
 				addr.Zone = strconv.FormatInt(int64(sa.ZoneId), 10)
 			}
+			return &addr
 		}
-		return &addr
 	}
+	return nil
 }

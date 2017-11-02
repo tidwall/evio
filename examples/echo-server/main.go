@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net"
 
 	"github.com/tidwall/evio"
 )
@@ -9,7 +10,7 @@ import (
 func main() {
 	var events evio.Events
 
-	events.Serving = func(wake func(id int) bool) (action evio.Action) {
+	events.Serving = func(wake func(id int) bool, addrs []net.Addr) (action evio.Action) {
 		log.Print("echo server started on port 5000")
 		return
 	}
@@ -19,5 +20,5 @@ func main() {
 		return
 	}
 
-	log.Fatal(evio.Serve(events, "tcp-net://0.0.0.0:5000"))
+	log.Fatal(evio.Serve(events, "tcp://0.0.0.0:5000"))
 }

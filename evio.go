@@ -45,7 +45,9 @@ type Events struct {
 	// Serving fires when the server can accept connections.
 	// The wake parameter is a goroutine-safe function that triggers
 	// a Data event (with a nil `in` parameter) for the specified id.
-	Serving func(wake func(id int) bool) (action Action)
+	// The addrs parameter is an array of listening addresses that align
+	// with the addr strings passed to the Serve function.
+	Serving func(wake func(id int) bool, addrs []net.Addr) (action Action)
 	// Opened fires when a new connection has opened.
 	// The addr parameter is the connection's local and remote addresses.
 	// Use the out return value to write data to the connection.
@@ -82,15 +84,15 @@ type Events struct {
 
 // Serve starts handling events for the specified addresses.
 //
-// Addresses should use a scheme prefix and be be formatted
+// Addresses should use a scheme prefix and be formatted
 // like `tcp://192.168.0.10:9851` or `unix://socket`.
-// Valid schemes:
+// Valid network schemes:
 //	tcp   - bind to both IPv4 and IPv6
 //  tcp4  - IPv4
 //  tcp6  - IPv6
 //  unix  - Unix Domain Socket
 //
-// The "tcp" scheme is assumed when one is not specified.
+// The "tcp" network scheme is assumed when one is not specified.
 func Serve(events Events, addr ...string) error {
 	var lns []*listener
 	defer func() {
@@ -104,8 +106,6 @@ func Serve(events Events, addr ...string) error {
 		if strings.Contains(addr, "://") {
 			ln.network = strings.Split(addr, "://")[0]
 			ln.addr = strings.Split(addr, "://")[1]
-		} else if !strings.Contains(addr, ":") {
-			ln.network = "unix"
 		}
 		if strings.HasSuffix(ln.network, "-net") {
 			stdlib = true
@@ -119,6 +119,7 @@ func Serve(events Events, addr ...string) error {
 		if err != nil {
 			return err
 		}
+		ln.naddr = ln.ln.Addr()
 		if !stdlib {
 			if err := ln.system(); err != nil {
 				return err
@@ -164,4 +165,5 @@ type listener struct {
 	fd      int
 	network string
 	addr    string
+	naddr   net.Addr
 }

@@ -76,6 +76,8 @@ func servenet(events Events, lns []*listener) error {
 		c.conn.SetDeadline(time.Time{}.Add(1))
 		return true
 	}
+	var swg sync.WaitGroup
+	swg.Add(1)
 	var ferr error
 	shutdown := func(err error) {
 		mu.Lock()
@@ -83,6 +85,7 @@ func servenet(events Events, lns []*listener) error {
 			mu.Unlock()
 			return
 		}
+		defer swg.Done()
 		done = true
 		ferr = err
 		for _, ln := range lns {
@@ -113,16 +116,20 @@ func servenet(events Events, lns []*listener) error {
 		}
 	}
 	if events.Serving != nil {
-		if events.Serving(wake) == Shutdown {
+		addrs := make([]net.Addr, len(lns))
+		for i, ln := range lns {
+			addrs[i] = ln.naddr
+		}
+		if events.Serving(wake, addrs) == Shutdown {
 			return nil
 		}
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(len(lns))
+	var lwg sync.WaitGroup
+	lwg.Add(len(lns))
 	for i, ln := range lns {
 		go func(lnidx int, ln net.Listener) {
-			defer wg.Done()
+			defer lwg.Done()
 			for {
 				conn, err := ln.Accept()
 				if err != nil {
@@ -175,14 +182,12 @@ func servenet(events Events, lns []*listener) error {
 						if caction != None {
 							goto write
 						}
-						if len(cout) > 0 {
-							conn.SetReadDeadline(time.Now().Add(time.Microsecond))
-						} else {
-							conn.SetReadDeadline(time.Now().Add(time.Second / 5))
-						}
+						conn.SetReadDeadline(time.Now().Add(time.Microsecond))
 						n, err = c.Read(packet[:])
 						if err != nil && !istimeout(err) {
-							c.err = err
+							if err != io.EOF {
+								c.err = err
+							}
 							goto close
 						}
 						if n > 0 {
@@ -220,10 +225,12 @@ func servenet(events Events, lns []*listener) error {
 									caction = Shutdown
 								}
 							}
-							conn.SetWriteDeadline(time.Now().Add(time.Second / 5))
+							conn.SetWriteDeadline(time.Now().Add(time.Microsecond))
 							n, err := c.Write(cout)
 							if err != nil && !istimeout(err) {
-								c.err = err
+								if err != io.EOF {
+									c.err = err
+								}
 								goto close
 							}
 							cout = cout[n:]
@@ -265,6 +272,7 @@ func servenet(events Events, lns []*listener) error {
 								if len(cout) > 0 {
 									c.outbuf = cout
 								}
+								c.detached = true
 								conn.SetDeadline(time.Time{})
 								mu.Lock()
 								if !done {
@@ -306,13 +314,24 @@ func servenet(events Events, lns []*listener) error {
 	}
 	go func() {
 		for {
+			mu.Lock()
+			if done {
+				mu.Unlock()
+				break
+			}
+			mu.Unlock()
 			var delay time.Duration
 			var action Action
+			mu.Lock()
 			if events.Tick != nil {
-				mu.Lock()
-				delay, action = events.Tick()
+				if !done {
+					delay, action = events.Tick()
+				}
+			} else {
 				mu.Unlock()
+				break
 			}
+			mu.Unlock()
 			if action == Shutdown {
 				shutdown(nil)
 				return
@@ -320,7 +339,8 @@ func servenet(events Events, lns []*listener) error {
 			time.Sleep(delay)
 		}
 	}()
-	wg.Wait()
+	lwg.Wait() // wait for listeners
+	swg.Wait() // wait for shutdown
 	return ferr
 }
 

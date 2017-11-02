@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-type tlsc struct {
+type tconn struct {
 	cond    [2]*sync.Cond    // stream locks
 	closed  [2]bool          // init to -1. when it reaches zero we're closed
 	prebuf  [2][]byte        // buffers before translation
@@ -15,16 +15,33 @@ type tlsc struct {
 	rd      [2]io.ReadCloser // reader pipes
 	wr      [2]io.Writer     // writer pipes
 	mu      sync.Mutex       // only for the error
+	action  Action           // the last known action
 	err     error            // the final error if any
 }
 
-func (c *tlsc) Read(p []byte) (n int, err error)  { return c.rd[0].Read(p) }
-func (c *tlsc) Write(p []byte) (n int, err error) { return c.wr[1].Write(p) }
+func (c *tconn) write(st int, b []byte) {
+	c.cond[st].L.Lock()
+	c.prebuf[st] = append(c.prebuf[st], b...)
+	c.cond[st].Broadcast()
+	c.cond[st].L.Unlock()
+}
 
-type nopConn struct{ rw io.ReadWriter }
+func (c *tconn) read(st int) []byte {
+	c.cond[st].L.Lock()
+	buf := c.postbuf[st]
+	c.postbuf[st] = nil
+	c.cond[st].L.Unlock()
+	return buf
+}
 
-func (c *nopConn) Read(p []byte) (n int, err error)          { return c.rw.Read(p) }
-func (c *nopConn) Write(p []byte) (n int, err error)         { return c.rw.Write(p) }
+func (c *tconn) Read(p []byte) (n int, err error)  { return c.rd[0].Read(p) }
+func (c *tconn) Write(p []byte) (n int, err error) { return c.wr[1].Write(p) }
+
+// nopConn just wraps a io.ReadWriter and makes it into a net.Conn.
+type nopConn struct{ io.ReadWriter }
+
+func (c *nopConn) Read(p []byte) (n int, err error)          { return c.ReadWriter.Read(p) }
+func (c *nopConn) Write(p []byte) (n int, err error)         { return c.ReadWriter.Write(p) }
 func (c *nopConn) LocalAddr() net.Addr                       { return nil }
 func (c *nopConn) RemoteAddr() net.Addr                      { return nil }
 func (c *nopConn) SetDeadline(deadline time.Time) error      { return nil }
@@ -32,20 +49,45 @@ func (c *nopConn) SetWriteDeadline(deadline time.Time) error { return nil }
 func (c *nopConn) SetReadDeadline(deadline time.Time) error  { return nil }
 func (c *nopConn) Close() error                              { return nil }
 
-func Translate(events Events, translate func(rd io.ReadWriter) io.ReadWriter) Events {
-	nevents := events
+// NopConn returns a net.Conn with a no-op LocalAddr, RemoteAddr,
+// SetDeadline, SetWriteDeadline, SetReadDeadline, and Close methods wrapping
+// the provided ReadWriter rw.
+func NopConn(rw io.ReadWriter) net.Conn {
+	return &nopConn{rw}
+}
+
+// Translate provides a utility for performing byte level translation
+// on the input and output streams for a connection. This is useful for
+// things like compression, encryption, TLS, etc. The function wraps
+// existing events and returns new events that manage the translation.
+// The `should` parameter is an optional function that can be used to
+// ignore or accept the translation for a specific connection.
+// The `translate` parameter is a function that provides a ReadWriter
+// for each new connection and returns a ReadWriter that performs the
+// actual translation.
+func Translate(
+	events Events,
+	should func(id int, addr Addr) bool,
+	translate func(rd io.ReadWriter) io.ReadWriter,
+) Events {
+	tevents := events
 	var wake func(id int) bool
 	var mu sync.Mutex
-	idc := make(map[int]*tlsc)
-	create := func(id int) {
+	idc := make(map[int]*tconn)
+	get := func(id int) *tconn {
 		mu.Lock()
-		c := &tlsc{
+		c := idc[id]
+		mu.Unlock()
+		return c
+	}
+	create := func(id int) *tconn {
+		mu.Lock()
+		c := &tconn{
 			cond: [2]*sync.Cond{
 				sync.NewCond(&sync.Mutex{}),
 				sync.NewCond(&sync.Mutex{}),
 			},
 		}
-
 		idc[id] = c
 		mu.Unlock()
 		tc := translate(c)
@@ -111,11 +153,10 @@ func Translate(events Events, translate func(rd io.ReadWriter) io.ReadWriter) Ev
 				}
 			}(st, wr)
 		}
+		return c
 	}
-	destroy := func(id int) error {
-		mu.Lock()
-		c := idc[id]
-		mu.Unlock()
+
+	destroy := func(c *tconn, id int) error {
 		for st := 0; st < 2; st++ {
 			if rd, ok := c.rd[st].(io.Closer); ok {
 				rd.Close()
@@ -136,69 +177,83 @@ func Translate(events Events, translate func(rd io.ReadWriter) io.ReadWriter) Ev
 		c.mu.Unlock()
 		return err
 	}
-	write := func(id, st int, b []byte) {
-		mu.Lock()
-		c := idc[id]
-		mu.Unlock()
-		c.cond[st].L.Lock()
-		c.prebuf[st] = append(c.prebuf[st], b...)
-		c.cond[st].Broadcast()
-		c.cond[st].L.Unlock()
-
-	}
-	read := func(id, st int) []byte {
-		mu.Lock()
-		c := idc[id]
-		mu.Unlock()
-		c.cond[st].L.Lock()
-		buf := c.postbuf[st]
-		c.postbuf[st] = nil
-		c.cond[st].L.Unlock()
-		return buf
-	}
-
-	nevents.Serving = func(wakefn func(id int) bool) (action Action) {
+	tevents.Serving = func(wakefn func(id int) bool, addrs []net.Addr) (action Action) {
 		wake = wakefn
-		return events.Serving(wakefn)
-	}
-	nevents.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
-		create(id)
-		out, opts, action = events.Opened(id, addr)
-		if len(out) > 0 {
-			write(id, 1, out)
+		if events.Serving != nil {
+			action = events.Serving(wakefn, addrs)
 		}
 		return
 	}
-	nevents.Closed = func(id int, err error) (action Action) {
-		ferr := destroy(id)
-		if err == nil {
-			err = ferr
+	tevents.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
+		if should != nil && !should(id, addr) {
+			if events.Opened != nil {
+				out, opts, action = events.Opened(id, addr)
+			}
+			return
 		}
-		action = events.Closed(id, err)
+		c := create(id)
+		if events.Opened != nil {
+			out, opts, c.action = events.Opened(id, addr)
+			if len(out) > 0 {
+				c.write(1, out)
+				out = nil
+				wake(id)
+			}
+		}
 		return
 	}
-	nevents.Data = func(id int, in []byte) (out []byte, action Action) {
+	tevents.Closed = func(id int, err error) (action Action) {
+		c := get(id)
+		if c != nil {
+			ferr := destroy(c, id)
+			if err == nil {
+				err = ferr
+			}
+		}
+		if events.Closed != nil {
+			action = events.Closed(id, err)
+		}
+		return
+	}
+	tevents.Data = func(id int, in []byte) (out []byte, action Action) {
+		c := get(id)
+		if c == nil {
+			if events.Data != nil {
+				out, action = events.Data(id, in)
+			}
+			return
+		}
 		if in == nil {
-			out = read(id, 1)
+			// wake up
+			out = c.read(1)
 			if len(out) > 0 {
 				wake(id)
 				return
 			}
-			in = read(id, 0)
+			if c.action != None {
+				return nil, c.action
+			}
+			in = c.read(0)
 			if len(in) > 0 {
-				out, action = events.Data(id, in)
-				if len(out) > 0 {
-					write(id, 1, out)
-					out = nil
+				if events.Data != nil {
+					out, c.action = events.Data(id, in)
+					if len(out) > 0 {
+						c.write(1, out)
+						out = nil
+					}
+					wake(id)
 				}
-				wake(id)
 				return
 			}
 		} else if len(in) > 0 {
-			write(id, 0, in)
+			if c.action != None {
+				return nil, c.action
+			}
+			// accept new input data
+			c.write(0, in)
 			in = nil
 		}
 		return
 	}
-	return nevents
+	return tevents
 }

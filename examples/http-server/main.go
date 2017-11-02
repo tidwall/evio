@@ -4,9 +4,9 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"io"
 	"log"
-	"net/http"
-	"os"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -27,34 +27,23 @@ type conn struct {
 }
 
 func main() {
-
-	var pem string
 	var port int
-	flag.StringVar(&pem, "tls", "", "tls pem file")
-	flag.IntVar(&port, "port", 8080, "server port")
-	flag.Parse()
+	var tlsport int
+	var tlspem string
 
-	if pem != "" && os.Getenv("GONET") == "1" {
-		http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-			w.Write([]byte("Hello World!\n"))
-		})
-		go log.Printf("compat http server started on port %d", port)
-		err := http.ListenAndServeTLS(fmt.Sprintf(":%d", port), pem, pem, nil)
-		if err != nil {
-			log.Fatal("ListenAndServe: ", err)
-		}
-		return
-	}
+	flag.IntVar(&port, "port", 8080, "server port")
+	flag.IntVar(&tlsport, "tlsport", 4443, "tls port")
+	flag.StringVar(&tlspem, "tlscert", "", "tls pem cert/key file")
+	flag.Parse()
 
 	var events evio.Events
 	var conns = make(map[int]*conn)
 
-	events.Serving = func(wakefn func(id int) bool) (action evio.Action) {
+	events.Serving = func(wakefn func(id int) bool, addr []net.Addr) (action evio.Action) {
 		log.Printf("http server started on port %d", port)
-		if pem != "" {
-			log.Printf("tls enabled")
+		if tlspem != "" {
+			log.Printf("https server started on port %d", tlsport)
 		}
-
 		return
 	}
 
@@ -75,11 +64,6 @@ func main() {
 		if in == nil {
 			return
 		}
-		// if in == nil {
-		// 	fmt.Printf(">> IN B: <nil>\n")
-		// } else {
-		// 	fmt.Printf(">> IN B: [%s]\n", in)
-		// }
 		c := conns[id]
 		data := c.is.Begin(in)
 		// process the pipeline
@@ -103,16 +87,36 @@ func main() {
 		c.is.End(data)
 		return
 	}
+	// We at least want the single http address.
+	addrs := []string{fmt.Sprintf("tcp://:%d", port)}
+	if tlspem != "" {
 
-	if pem != "" {
-		cer, err := tls.LoadX509KeyPair(pem, pem)
+		// load the cert and key pair from the concat'd pem file.
+		cer, err := tls.LoadX509KeyPair(tlspem, tlspem)
 		if err != nil {
 			log.Fatal(err)
 		}
 		config := &tls.Config{Certificates: []tls.Certificate{cer}}
-		events = evio.TLS(events, config)
+		// Update the address list to include https.
+		addrs = append(addrs, fmt.Sprintf("tcp://:%d", tlsport))
+
+		// TLS translate the events
+		events = evio.Translate(events,
+			func(id int, addr evio.Addr) bool {
+				// only translate for the second address.
+				return addr.Index == 1
+			},
+			func(rw io.ReadWriter) io.ReadWriter {
+				// Use the standard Go crypto/tls package and create a tls.Conn
+				// from the provided io.ReadWriter. Here we use the handy
+				// evio.NopConn utility to create a barebone net.Conn in order
+				// for the tls.Server to accept the connection.
+				return tls.Server(evio.NopConn(rw), config)
+			},
+		)
 	}
-	log.Fatal(evio.Serve(events, fmt.Sprintf("tcp://:%d", port)))
+	// Start serving!
+	log.Fatal(evio.Serve(events, addrs...))
 }
 
 // appendhandle handles the incoming request and appends the response to
