@@ -323,7 +323,7 @@ func serve(events Events, lns []*listener) error {
 				c.outpos += n
 				if len(c.outbuf)-c.outpos == 0 {
 					c.outpos = 0
-					c.outbuf = nil
+					c.outbuf = c.outbuf[:0]
 				}
 			}
 			if c.action == Shutdown {

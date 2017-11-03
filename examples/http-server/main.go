@@ -63,28 +63,18 @@ func main() {
 
 	events.Opened = func(id int, addr evio.Addr) (out []byte, opts evio.Options, action evio.Action) {
 		conns[id] = &conn{addr: addr}
-		log.Printf("%s: opened", addr.Remote.String())
+		//log.Printf("opened: %d: %s: %s", id, addr.Local.String(), addr.Remote.String())
 		return
 	}
 
 	events.Closed = func(id int, err error) (action evio.Action) {
-		c := conns[id]
-		log.Printf("%s: closed: %v", c.addr.Remote.String(), err)
+		// c := conns[id]
+		// log.Printf("closed: %d: %s: %s", id, c.addr.Local.String(), c.addr.Remote.String())
 		delete(conns, id)
 		return
 	}
 
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
-		// 		out = []byte(`HTTP/1.1 200 OK
-		// Server: evio
-		// Date: Thu, 02 Nov 2017 15:48:57 GMT
-		// Content-Type: text/plain; charset=utf-8
-		// Content-Length: 1024
-
-		// aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`)
-
-		// 		return
-
 		if in == nil {
 			return
 		}
@@ -112,7 +102,7 @@ func main() {
 		return
 	}
 	// We at least want the single http address.
-	addrs := []string{fmt.Sprintf("tcp://localhost:%d", port)}
+	addrs := []string{fmt.Sprintf("tcp://:%d", port)}
 	if tlspem != "" {
 		// load the cert and key pair from the concat'd pem file.
 		cer, err := tls.LoadX509KeyPair(tlspem, tlspem)
@@ -121,7 +111,7 @@ func main() {
 		}
 		config := &tls.Config{Certificates: []tls.Certificate{cer}}
 		// Update the address list to include https.
-		addrs = append(addrs, fmt.Sprintf("tcp://localhost:%d", tlsport))
+		addrs = append(addrs, fmt.Sprintf("tcp://:%d", tlsport))
 
 		// TLS translate the events
 		events = evio.Translate(events,

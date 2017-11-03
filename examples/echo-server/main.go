@@ -5,6 +5,8 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
 	"net"
 
@@ -12,17 +14,26 @@ import (
 )
 
 func main() {
-	var events evio.Events
+	var port int
+	flag.IntVar(&port, "port", 5000, "server port")
+	flag.Parse()
 
+	var events evio.Events
 	events.Serving = func(wake func(id int) bool, addrs []net.Addr) (action evio.Action) {
-		log.Print("echo server started on port 5000")
+		log.Printf("echo server started on port %d", port)
 		return
 	}
-
+	events.Opened = func(id int, addr evio.Addr) (out []byte, opts evio.Options, action evio.Action) {
+		//log.Printf("opened: %d: %s", id, addr.Remote.String())
+		return
+	}
+	events.Closed = func(id int, err error) (action evio.Action) {
+		//log.Printf("closed: %d", id)
+		return
+	}
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 		out = in
 		return
 	}
-
-	log.Fatal(evio.Serve(events, "tcp://0.0.0.0:5000"))
+	log.Fatal(evio.Serve(events, fmt.Sprintf("tcp://:%d", port)))
 }
