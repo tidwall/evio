@@ -3,19 +3,18 @@
 #set -e
 
 echo ""
-echo "--- ECHO START ---"
+echo "--- BENCH ECHO START ---"
 echo ""
 
 cd $(dirname "${BASH_SOURCE[0]}")
 function cleanup {
-    echo "--- ECHO DONE ---"
+    echo "--- BENCH ECHO DONE ---"
     kill $(jobs -rp)
     wait $(jobs -rp) 2>/dev/null
 }
 trap cleanup EXIT
 
 mkdir -p bin
-
 $(pkill net-echo-server || printf "")
 $(pkill evio-echo-server || printf "")
 
@@ -24,12 +23,11 @@ function gobench {
     if [ "$3" != "" ]; then
         go build -o $2 $3
     fi
-    $2 -port $4 &
+    GOMAXPROCS=1 $2 --port $4 &
     sleep 1
     echo "Sending 6 byte packets, 50 connections"
     nl=$'\r\n'
     tcpkali -c 50 -m "PING{$nl}" 127.0.0.1:$4
-    echo "--- DONE ---"
     echo ""
 }
 

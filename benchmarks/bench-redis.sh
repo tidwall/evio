@@ -3,20 +3,18 @@
 #set -e
 
 echo ""
-echo "--- REDIS START ---"
+echo "--- BENCH REDIS START ---"
 echo ""
-
 
 cd $(dirname "${BASH_SOURCE[0]}")
 function cleanup {
-    echo "--- REDIS DONE ---"
+    echo "--- BENCH REDIS DONE ---"
     kill $(jobs -rp)
     wait $(jobs -rp) 2>/dev/null
 }
 trap cleanup EXIT
 
 mkdir -p bin
-
 $(pkill redis-server || printf "")
 $(pkill evio-redis-server || printf "")
 
@@ -25,7 +23,7 @@ function gobench {
     if [ "$3" != "" ]; then
         go build -o $2 $3
     fi
-    $2 --port $4 &
+    GOMAXPROCS=1 $2 --port $4 &
     sleep 1
     echo "Sending pings, 50 connections, 1 packet pipeline"
     redis-benchmark -p $4 -t ping -q -P 1
@@ -33,7 +31,6 @@ function gobench {
     redis-benchmark -p $4 -t ping -q -P 10
     echo "Sending pings, 50 connections, 20 packet pipeline"
     redis-benchmark -p $4 -t ping -q -P 20
-    echo "--- DONE ---"
     echo ""
 }
 gobench "real/redis" redis-server "" 6392

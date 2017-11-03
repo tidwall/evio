@@ -37,11 +37,13 @@ func main() {
 	var tlsport int
 	var tlspem string
 	var aaaa bool
+	var noparse bool
 
 	flag.IntVar(&port, "port", 8080, "server port")
 	flag.IntVar(&tlsport, "tlsport", 4443, "tls port")
 	flag.StringVar(&tlspem, "tlscert", "", "tls pem cert/key file")
 	flag.BoolVar(&aaaa, "aaaa", false, "aaaaa....")
+	flag.BoolVar(&noparse, "noparse", true, "do not parse requests")
 	flag.Parse()
 
 	if aaaa {
@@ -76,6 +78,10 @@ func main() {
 
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 		if in == nil {
+			return
+		}
+		if noparse {
+			out = []byte("HTTP/1.1 200 OK\r\nServer: evio\r\nDate: Fri, 03 Nov 2017 11:37:00 GMT\r\nContent-Length: 14\r\n\r\nHello World!\r\n")
 			return
 		}
 		c := conns[id]

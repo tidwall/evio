@@ -477,9 +477,6 @@ func TestBadAddresses(t *testing.T) {
 	if err := Serve(events, "howdy"); err == nil {
 		t.Fatalf("expected error")
 	}
-	if err := Serve(events, "unix://"); err == nil {
-		t.Fatalf("expected error")
-	}
 	if err := Serve(events, "tcp://"); err != nil {
 		t.Fatalf("expected nil, got '%v'", err)
 	}
@@ -670,7 +667,7 @@ func testTranslate(network, addr string, kind string, stdlib bool) {
 		func(id int, addr Addr) bool {
 			return true
 		},
-		func(rw io.ReadWriter) io.ReadWriter {
+		func(id int, rw io.ReadWriter) io.ReadWriter {
 			switch kind {
 			case "passthrough":
 				return rw
@@ -690,7 +687,7 @@ func testTranslate(network, addr string, kind string, stdlib bool) {
 		func(id int, addr Addr) bool {
 			return false
 		},
-		func(rw io.ReadWriter) io.ReadWriter {
+		func(id int, rw io.ReadWriter) io.ReadWriter {
 			return rw
 		},
 	)
