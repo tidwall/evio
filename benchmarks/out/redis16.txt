@@ -1,0 +1,41 @@
+
+--- BENCH REDIS PIPELINE 16 START ---
+
+--- REAL REDIS ---
+6857:M 03 Nov 16:37:59.270 # You requested maxclients of 10000 requiring at least 10032 max file descriptors.
+6857:M 03 Nov 16:37:59.270 # Server can't set maximum open files to 10032 because of OS error: Operation not permitted.
+6857:M 03 Nov 16:37:59.270 # Current maximum open files is 4096. maxclients has been reduced to 4064 to compensate for low ulimit. If you need higher maxclients increase 'ulimit -n'.
+                _._                                                  
+           _.-``__ ''-._                                             
+      _.-``    `.  `_.  ''-._           Redis 3.2.8 (db8a945c/0) 64 bit
+  .-`` .-```.  ```\/    _.,_ ''-._                                   
+ (    '      ,       .-`  | `,    )     Running in standalone mode
+ |`-._`-...-` __...-.``-._|'` _.-'|     Port: 6392
+ |    `-._   `._    /     _.-'    |     PID: 6857
+  `-._    `-._  `-./  _.-'    _.-'                                   
+ |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+ |    `-._`-._        _.-'_.-'    |           http://redis.io        
+  `-._    `-._`-.__.-'_.-'    _.-'                                   
+ |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+ |    `-._`-._        _.-'_.-'    |                                  
+  `-._    `-._`-.__.-'_.-'    _.-'                                   
+      `-._    `-.__.-'    _.-'                                       
+          `-._        _.-'                                           
+              `-.__.-'                                               
+
+6857:M 03 Nov 16:37:59.271 # Server started, Redis version 3.2.8
+6857:M 03 Nov 16:37:59.271 * The server is now ready to accept connections on port 6392
+*** 50 connections, 1000000 commands, 16 commands pipeline
+PING_INLINE: nanPING_INLINE: 773376.00PING_INLINE: 788832.00PING_INLINE: 687808.00PING_INLINE: 688784.00PING_INLINE: 696985.62PING_INLINE: 689655.12 requests per second
+
+--- DONE ---
+
+--- EVIO REDIS CLONE ---
+2017/11/03 16:38:02 redis server started on port 6393
+2017/11/03 16:38:02 redis server started at socket
+*** 50 connections, 1000000 commands, 16 commands pipeline
+PING_INLINE: 0.00PING_INLINE: 1550024.00PING_INLINE: 1538682.62PING_INLINE: 1536098.25 requests per second
+
+--- DONE ---
+
+--- BENCH REDIS PIPELINE 16 DONE ---

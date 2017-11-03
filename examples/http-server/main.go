@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -45,6 +46,10 @@ func main() {
 	flag.BoolVar(&aaaa, "aaaa", false, "aaaaa....")
 	flag.BoolVar(&noparse, "noparse", true, "do not parse requests")
 	flag.Parse()
+
+	if os.Getenv("NOPARSE") == "1" {
+		noparse = true
+	}
 
 	if aaaa {
 		res = strings.Repeat("a", 1024)
@@ -81,6 +86,7 @@ func main() {
 			return
 		}
 		if noparse {
+			// for testing minimal single packet request -> response.
 			out = []byte("HTTP/1.1 200 OK\r\nServer: evio\r\nDate: Fri, 03 Nov 2017 11:37:00 GMT\r\nContent-Length: 14\r\n\r\nHello World!\r\n")
 			return
 		}

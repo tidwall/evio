@@ -1,0 +1,58 @@
+
+--- BENCH HTTP START ---
+
+--- GO STDLIB ---
+2017/11/03 16:36:23 http server started on port 8081
+*** 50 connections, 10 seconds
+Running 10s test @ http://127.0.0.1:8081
+  1 threads and 50 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   702.61us  289.11us   4.36ms   65.96%
+    Req/Sec    71.71k     4.47k   75.96k    91.09%
+  719868 requests in 10.10s, 89.93MB read
+Requests/sec:  71263.20
+Transfer/sec:      8.90MB
+--- DONE ---
+
+--- IRIS ---
+Now listening on: http://localhost:8082
+Application started. Press CMD+C to shut down.
+2017/11/03 16:36:35 http server started on port 8082
+*** 50 connections, 10 seconds
+Running 10s test @ http://127.0.0.1:8082
+  1 threads and 50 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     0.86ms  556.33us   5.49ms   89.37%
+    Req/Sec    62.49k     2.32k   67.04k    67.33%
+  627701 requests in 10.10s, 78.42MB read
+Requests/sec:  62138.33
+Transfer/sec:      7.76MB
+--- DONE ---
+
+--- FASTHTTP ---
+2017/11/03 16:36:47 http server started on port 8083
+*** 50 connections, 10 seconds
+Running 10s test @ http://127.0.0.1:8083
+  1 threads and 50 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   442.36us  128.03us   4.22ms   81.00%
+    Req/Sec   110.18k    12.49k  135.57k    63.00%
+  1095146 requests in 10.00s, 155.62MB read
+Requests/sec: 109505.28
+Transfer/sec:     15.56MB
+--- DONE ---
+
+--- EVIO ---
+2017/11/03 16:36:58 http server started on port 8084
+*** 50 connections, 10 seconds
+Running 10s test @ http://127.0.0.1:8084
+  1 threads and 50 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   429.45us  239.79us   9.92ms   95.43%
+    Req/Sec   113.16k    16.86k  128.84k    85.15%
+  1136765 requests in 10.10s, 112.75MB read
+Requests/sec: 112542.41
+Transfer/sec:     11.16MB
+--- DONE ---
+
+--- BENCH HTTP DONE ---
