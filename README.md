@@ -20,7 +20,7 @@ The goal of this project is to create a server framework for Go that performs on
 - Allows [multiple network binding](#multiple-addresses) on the same event loop
 - Flexible [ticker](#ticker) event
 - Fallback for non-epoll/kqueue operating systems by simulating events with the [net](https://golang.org/pkg/net/) package
-- Ability to [wake up](#wake-up) connections for long running background operations
+- Ability to [wake up](#wake-up) connections from long running background operations
 
 ## Getting Started
 
