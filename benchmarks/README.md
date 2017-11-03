@@ -6,3 +6,5 @@ Required:
 - [tcpkali](https://github.com/machinezone/tcpkali) for Echo
 - [Redis](http://redis.io) for Redis
 
+Run `bench.sh` for all benchmarks.
+
