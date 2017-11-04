@@ -11,6 +11,19 @@
 
 The goal of this project is to create a server framework for Go that performs on par with [Redis](http://redis.io) and [Haproxy](http://www.haproxy.org) for packet handling. My hope is to use this as a foundation for [Tile38](https://github.com/tidwall/tile38) and a future L7 proxy for Go... and a bunch of other stuff.
 
+
+**Important note**
+
+This project is not intended to be a general purpose replacement for the standard Go net package or goroutines. It's for building specialized services such as key value stores, L7 proxies, static websites, etc.
+
+You would not want to use this framework if you need to handle long-running requests (milliseconds or more). For example, a web api that needs to connect to a mongo database, authenticate, and respond; just use the Go net/http package instead.
+
+There are many popular event loop based applications in the wild such as Nginx, Haproxy, Redis, and Memcached. All of these are single-threaded and very fast and written in C.
+
+The reason I wrote this framework is so I can build certain network services that perform like the C apps above, but I also want to continue to work in Go.
+
+
+
 ## Features
 
 - [Fast](#performance) single-threaded event loop
