@@ -25,10 +25,10 @@ function gobench {
     if [ "$3" != "" ]; then
         go build -o $2 $3
     fi
-    NOPARSE=1 GOMAXPROCS=1 $2 --port $4 &
+    GOMAXPROCS=1 $2 --port $4 &
     sleep 1
     echo "*** 50 connections, 10 seconds"
-    wrk -t1 -c50 -d10 http://127.0.0.1:$4
+    bombardier -c 50 http://127.0.0.1:$4
     echo "--- DONE ---"
     echo ""
 }

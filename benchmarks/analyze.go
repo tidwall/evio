@@ -85,8 +85,9 @@ func analyze() {
 					output()
 				}
 			case category == "http":
-				if strings.HasPrefix(line, "Requests/sec:") {
-					rate, err = strconv.ParseFloat(strings.TrimSpace(strings.Split(line, ":")[1]), 64)
+				if strings.HasPrefix(line, "Reqs/sec ") {
+					rate, err = strconv.ParseFloat(
+						strings.Split(strings.TrimSpace(strings.Split(line, "Reqs/sec ")[1]), " ")[0], 64)
 					must(err)
 					output()
 				}

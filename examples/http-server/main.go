@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -85,13 +86,13 @@ func main() {
 		if in == nil {
 			return
 		}
-		if noparse {
-			// for testing minimal single packet request -> response.
-			out = []byte("HTTP/1.1 200 OK\r\nServer: evio\r\nDate: Fri, 03 Nov 2017 11:37:00 GMT\r\nContent-Length: 14\r\n\r\nHello World!\r\n")
-			return
-		}
 		c := conns[id]
 		data := c.is.Begin(in)
+		if noparse && bytes.Contains(data, []byte("\r\n\r\n")) {
+			// for testing minimal single packet request -> response.
+			out = appendresp(nil, "200 OK", "", "Hello World!")
+			return
+		}
 		// process the pipeline
 		var req request
 		for {
