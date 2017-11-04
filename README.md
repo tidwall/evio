@@ -200,37 +200,17 @@ $ go run examples/echo-server/main.go
 
 ## Performance
 
-The benchmarks below use pipelining which allows for combining multiple Redis commands into a single packet.
+### Benchmarks
 
-**Real Redis**
+These benchmarks were run on an ec2 c4.xlarge instance in single-threaded mode (GOMAXPROC=1) over Ipv4 localhost.
+Check out [benchmarks](benchmarks) for more info.
 
-```sh
-$ redis-server
-```
+<img src="benchmarks/out/echo.png" width="336" height="144" border="0" alt="echo benchmark">
+<img src="benchmarks/out/http.png" width="336" height="144" border="0" alt="http benchmark">
+<img src="benchmarks/out/redis_pipeline_1.png" width="336" height="144" border="0" alt="redis 1 benchmark">
+<img src="benchmarks/out/redis_pipeline_8.png" width="336" height="144" border="0" alt="redis 8 benchmark">
+<img src="benchmarks/out/redis_pipeline_16.png" width="336" height="144" border="0" alt="redis 16 benchmark">
 
-```
-redis-benchmark -p 6379 -t ping,set,get -q -P 32
-PING_INLINE: 869565.19 requests per second
-PING_BULK: 1694915.25 requests per second
-SET: 917431.19 requests per second
-GET: 1265822.75 requests per second
-```
-
-**Redis clone (evio)**
-
-```sh
-$ go run examples/redis-server/main.go
-```
-
-```
-redis-benchmark -p 6380 -t ping,set,get -q -P 32
-PING_INLINE: 2380952.50 requests per second
-PING_BULK: 2380952.50 requests per second
-SET: 2325581.25 requests per second
-GET: 2222222.25 requests per second
-```
-
-*Running on a MacBook Pro 15" 2.8 GHz Intel Core i7 using Go 1.7*
 
 ## Contact
 
