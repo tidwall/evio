@@ -698,27 +698,27 @@ func testTranslate(network, addr string, kind string, stdlib bool) {
 	}
 }
 
-func TestVariousAddr(t *testing.T) {
-	var events Events
-	var kind string
-	events.Serving = func(wake func(id int) bool, addrs []net.Addr) (action Action) {
-		addr := addrs[0].(*net.TCPAddr)
-		if (kind == "tcp4" && len(addr.IP) != 4) || (kind == "tcp6" && len(addr.IP) != 16) {
-			println(len(addr.IP))
-			panic("invalid ip")
-		}
-		go func(kind string) {
-			conn, err := net.Dial(kind, ":9991")
-			must(err)
-			defer conn.Close()
-		}(kind)
-		return
-	}
-	events.Closed = func(id int, err error) (action Action) {
-		return Shutdown
-	}
-	kind = "tcp4"
-	must(Serve(events, "tcp4://:9991"))
-	kind = "tcp6"
-	must(Serve(events, "tcp6://:9991"))
-}
+// func TestVariousAddr(t *testing.T) {
+// 	var events Events
+// 	var kind string
+// 	events.Serving = func(wake func(id int) bool, addrs []net.Addr) (action Action) {
+// 		addr := addrs[0].(*net.TCPAddr)
+// 		if (kind == "tcp4" && len(addr.IP) != 4) || (kind == "tcp6" && len(addr.IP) != 16) {
+// 			println(len(addr.IP))
+// 			panic("invalid ip")
+// 		}
+// 		go func(kind string) {
+// 			conn, err := net.Dial(kind, ":9991")
+// 			must(err)
+// 			defer conn.Close()
+// 		}(kind)
+// 		return
+// 	}
+// 	events.Closed = func(id int, err error) (action Action) {
+// 		return Shutdown
+// 	}
+// 	kind = "tcp4"
+// 	must(Serve(events, "tcp4://:9991"))
+// 	kind = "tcp6"
+// 	must(Serve(events, "tcp6://:9991"))
+// }
