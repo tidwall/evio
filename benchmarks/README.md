@@ -24,3 +24,5 @@ Run `bench.sh` for all benchmarks.
 - The current results were run on an Ec2 c4.xlarge instance.
 - The servers started in single-threaded mode (GOMAXPROC=1).
 - Network clients connected over Ipv4 localhost.
+
+Like all benchmarks ever made in the history of whatever, YMMV. Please tweak and run in your environment and let me know if you see any glaring issues.
