@@ -2,39 +2,26 @@
 --- BENCH REDIS PIPELINE 8 START ---
 
 --- REAL REDIS ---
-6815:M 03 Nov 16:37:54.009 # You requested maxclients of 10000 requiring at least 10032 max file descriptors.
-6815:M 03 Nov 16:37:54.009 # Server can't set maximum open files to 10032 because of OS error: Operation not permitted.
-6815:M 03 Nov 16:37:54.009 # Current maximum open files is 4096. maxclients has been reduced to 4064 to compensate for low ulimit. If you need higher maxclients increase 'ulimit -n'.
-                _._                                                  
-           _.-``__ ''-._                                             
-      _.-``    `.  `_.  ''-._           Redis 3.2.8 (db8a945c/0) 64 bit
-  .-`` .-```.  ```\/    _.,_ ''-._                                   
- (    '      ,       .-`  | `,    )     Running in standalone mode
- |`-._`-...-` __...-.``-._|'` _.-'|     Port: 6392
- |    `-._   `._    /     _.-'    |     PID: 6815
-  `-._    `-._  `-./  _.-'    _.-'                                   
- |`-._`-._    `-.__.-'    _.-'_.-'|                                  
- |    `-._`-._        _.-'_.-'    |           http://redis.io        
-  `-._    `-._`-.__.-'_.-'    _.-'                                   
- |`-._`-._    `-.__.-'    _.-'_.-'|                                  
- |    `-._`-._        _.-'_.-'    |                                  
-  `-._    `-._`-.__.-'_.-'    _.-'                                   
-      `-._    `-.__.-'    _.-'                                       
-          `-._        _.-'                                           
-              `-.__.-'                                               
-
-6815:M 03 Nov 16:37:54.010 # Server started, Redis version 3.2.8
-6815:M 03 Nov 16:37:54.010 * The server is now ready to accept connections on port 6392
+15775:C 04 Nov 00:10:04.957 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+15775:C 04 Nov 00:10:04.957 # Redis version=4.0.2, bits=64, commit=00000000, modified=0, pid=15775, just started
+15775:C 04 Nov 00:10:04.957 # Configuration loaded
+15775:M 04 Nov 00:10:04.958 * Increased maximum number of open files to 10032 (it was originally set to 1024).
+15775:M 04 Nov 00:10:04.959 * Running mode=standalone, port=6392.
+15775:M 04 Nov 00:10:04.959 # WARNING: The TCP backlog setting of 511 cannot be enforced because /proc/sys/net/core/somaxconn is set to the lower value of 128.
+15775:M 04 Nov 00:10:04.959 # Server initialized
+15775:M 04 Nov 00:10:04.959 # WARNING overcommit_memory is set to 0! Background save may fail under low memory condition. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.
+15775:M 04 Nov 00:10:04.959 # WARNING you have Transparent Huge Pages (THP) support enabled in your kernel. This will create latency and memory usage issues with Redis. To fix this issue run the command 'echo never > /sys/kernel/mm/transparent_hugepage/enabled' as root, and add it to your /etc/rc.local in order to retain the setting after a reboot. Redis must be restarted after THP is disabled.
+15775:M 04 Nov 00:10:04.959 * Ready to accept connections
 *** 50 connections, 1000000 commands, 8 commands pipeline
-PING_INLINE: nanPING_INLINE: 611616.00PING_INLINE: 595296.00PING_INLINE: 589664.00PING_INLINE: 594752.00PING_INLINE: 581139.19PING_INLINE: 584784.00PING_INLINE: 583090.38 requests per second
+PING_INLINE: -nanPING_INLINE: 646432.00PING_INLINE: 648144.00PING_INLINE: 648789.31PING_INLINE: 648896.00PING_INLINE: 649043.19PING_INLINE: 649210.69PING_INLINE: 649350.69 requests per second
 
 --- DONE ---
 
 --- EVIO REDIS CLONE ---
-2017/11/03 16:37:57 redis server started on port 6393
-2017/11/03 16:37:57 redis server started at socket
+2017/11/04 00:10:07 redis server started on port 6393
+2017/11/04 00:10:07 redis server started at socket
 *** 50 connections, 1000000 commands, 8 commands pipeline
-PING_INLINE: nanPING_INLINE: 886112.00PING_INLINE: 893152.00PING_INLINE: 874496.00PING_INLINE: 865888.00PING_INLINE: 864304.25 requests per second
+PING_INLINE: 0.00PING_INLINE: 1234804.88PING_INLINE: 1235928.12PING_INLINE: 1250045.25PING_INLINE: 1253132.88 requests per second
 
 --- DONE ---
 

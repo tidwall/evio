@@ -2,35 +2,33 @@
 --- BENCH ECHO START ---
 
 --- GO STDLIB ---
-2017/11/03 16:37:10 echo server started on port 5001
+2017/11/04 00:06:31 echo server started on port 5001
 *** 50 connections, 10 seconds, 6 byte packets
 Destination: [127.0.0.1]:5001
-Interface lo0 address [127.0.0.1]:0
-Interface lo0 address [127.94.0.1]:0
-Using interface lo0 to connect to [127.0.0.1]:5001
+Interface lo address [127.0.0.1]:0
+Using interface lo to connect to [127.0.0.1]:5001
 Ramped up to 50 connections.
-Total data sent:     6131.1 MiB (6428962876 bytes)
-Total data received: 6132.4 MiB (6430294582 bytes)
-Bandwidth per channel: 205.668⇅ Mbps (25708.5 kBps)
-Aggregate bandwidth: 5142.242↓, 5141.177↑ Mbps
-Packet rate estimate: 472952.1↓, 446187.4↑ (6↓, 12↑ TCP MSS/op)
-Test duration: 10.0039 s.
+Total data sent:     9409.8 MiB (9866903552 bytes)
+Total data received: 9165.8 MiB (9611005954 bytes)
+Bandwidth per channel: 311.589⇅ Mbps (38948.6 kBps)
+Aggregate bandwidth: 7687.378↓, 7892.059↑ Mbps
+Packet rate estimate: 721925.3↓, 677380.8↑ (6↓, 45↑ TCP MSS/op)
+Test duration: 10.0019 s.
 --- DONE ---
 
 --- EVIO ---
-2017/11/03 16:37:21 echo server started on port 5002
+2017/11/04 00:06:43 echo server started on port 5002
 *** 50 connections, 10 seconds, 6 byte packets
 Destination: [127.0.0.1]:5002
-Interface lo0 address [127.0.0.1]:0
-Interface lo0 address [127.94.0.1]:0
-Using interface lo0 to connect to [127.0.0.1]:5002
+Interface lo address [127.0.0.1]:0
+Using interface lo to connect to [127.0.0.1]:5002
 Ramped up to 50 connections.
-Total data sent:     17129.1 MiB (17961204524 bytes)
-Total data received: 17117.6 MiB (17949094958 bytes)
-Bandwidth per channel: 574.050⇅ Mbps (71756.2 kBps)
-Aggregate bandwidth: 14346.408↓, 14356.087↑ Mbps
-Packet rate estimate: 1333916.3↓, 1238381.2↑ (12↓, 24↑ TCP MSS/op)
-Test duration: 10.009 s.
+Total data sent:     15867.3 MiB (16638083072 bytes)
+Total data received: 15855.5 MiB (16625705220 bytes)
+Bandwidth per channel: 532.133⇅ Mbps (66516.6 kBps)
+Aggregate bandwidth: 13298.362↓, 13308.263↑ Mbps
+Packet rate estimate: 1217575.2↓, 1142257.4↑ (12↓, 45↑ TCP MSS/op)
+Test duration: 10.0017 s.
 --- DONE ---
 
 --- BENCH ECHO DONE ---
