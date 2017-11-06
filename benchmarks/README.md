@@ -11,7 +11,6 @@ Required Go packages:
 ```
 go get gonum.org/v1/plot/...
 go get -u github.com/valyala/fasthttp
-go get -u github.com/kataras/iris
 go get -u github.com/tidwall/redcon
 ```
 
