@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -61,7 +60,7 @@ func main() {
 	var events evio.Events
 	var conns = make(map[int]*conn)
 
-	events.Serving = func(wakefn func(id int) bool, addr []net.Addr) (action evio.Action) {
+	events.Serving = func(ctx evio.Context) (action evio.Action) {
 		log.Printf("http server started on port %d", port)
 		if tlspem != "" {
 			log.Printf("https server started on port %d", tlsport)

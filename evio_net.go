@@ -68,17 +68,19 @@ func servenet(events Events, lns []*listener) error {
 	var cmu sync.Mutex
 	var idconn = make(map[int]*netConn)
 	var done bool
-	wake := func(id int) bool {
-		cmu.Lock()
-		c := idconn[id]
-		cmu.Unlock()
-		if c == nil {
-			return false
-		}
-		atomic.StoreInt64(&c.wake, 1)
-		// force a quick wakeup
-		c.conn.SetDeadline(time.Time{}.Add(1))
-		return true
+	ctx := Context{
+		Wake: func(id int) bool {
+			cmu.Lock()
+			c := idconn[id]
+			cmu.Unlock()
+			if c == nil {
+				return false
+			}
+			atomic.StoreInt64(&c.wake, 1)
+			// force a quick wakeup
+			c.conn.SetDeadline(time.Time{}.Add(1))
+			return true
+		},
 	}
 	var swg sync.WaitGroup
 	swg.Add(1)
@@ -119,16 +121,15 @@ func servenet(events Events, lns []*listener) error {
 			}
 		}
 	}
+	ctx.Addrs = make([]net.Addr, len(lns))
+	for i, ln := range lns {
+		ctx.Addrs[i] = ln.naddr
+	}
 	if events.Serving != nil {
-		addrs := make([]net.Addr, len(lns))
-		for i, ln := range lns {
-			addrs[i] = ln.naddr
-		}
-		if events.Serving(wake, addrs) == Shutdown {
+		if events.Serving(ctx) == Shutdown {
 			return nil
 		}
 	}
-
 	var lwg sync.WaitGroup
 	lwg.Add(len(lns))
 	for i, ln := range lns {

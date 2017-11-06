@@ -55,7 +55,7 @@ func testServe(network, addr string, unix bool, nclients int) {
 	var disconnected int
 
 	var events Events
-	events.Serving = func(wake func(id int) bool, addrs []net.Addr) (action Action) {
+	events.Serving = func(ctx Context) (action Action) {
 		return
 	}
 	events.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
@@ -163,9 +163,9 @@ func TestWake(t *testing.T) {
 }
 func testWake(network, addr string, stdlib bool) {
 	var events Events
-	var wake func(id int) bool
-	events.Serving = func(wakefn func(id int) bool, addrs []net.Addr) (action Action) {
-		wake = wakefn
+	var ctx Context
+	events.Serving = func(ctxin Context) (action Action) {
+		ctx = ctxin
 		go func() {
 			conn, err := net.Dial(network, addr)
 			must(err)
@@ -209,7 +209,7 @@ func testWake(network, addr string, stdlib bool) {
 				cin = nil
 			}
 			if len(cout) > 0 {
-				wake(cid)
+				ctx.Wake(cid)
 			}
 			cond.Wait()
 		}
@@ -419,7 +419,7 @@ func testDetach(network, addr string, stdlib bool) {
 		}()
 		return
 	}
-	events.Serving = func(_ func(id int) bool, addrs []net.Addr) (action Action) {
+	events.Serving = func(ctx Context) (action Action) {
 		go func() {
 			// client connection
 			conn, err := net.Dial(network, addr)
@@ -468,7 +468,7 @@ func testDetach(network, addr string, stdlib bool) {
 
 func TestBadAddresses(t *testing.T) {
 	var events Events
-	events.Serving = func(wake func(id int) bool, addrs []net.Addr) (action Action) {
+	events.Serving = func(ctx Context) (action Action) {
 		return Shutdown
 	}
 	if err := Serve(events, "tulip://howdy"); err == nil {
@@ -528,21 +528,21 @@ func TestPrePostwrite(t *testing.T) {
 
 func testPrePostwrite(network, addr string, stdlib bool) {
 	var events Events
-	var wake func(id int) bool
+	var ctx Context
 	var packets int
 	var tout []byte
 	events.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
 		packets++
 		out = []byte(fmt.Sprintf("hello %d\r\n", packets))
 		tout = append(tout, out...)
-		wake(id)
+		ctx.Wake(id)
 		return
 	}
 	events.Data = func(id int, in []byte) (out []byte, action Action) {
 		packets++
 		out = []byte(fmt.Sprintf("hello %d\r\n", packets))
 		tout = append(tout, out...)
-		wake(id)
+		ctx.Wake(id)
 		return
 	}
 	events.Prewrite = func(id int, amount int) (action Action) {
@@ -562,8 +562,8 @@ func testPrePostwrite(network, addr string, stdlib bool) {
 		action = Shutdown
 		return
 	}
-	events.Serving = func(wakefn func(id int) bool, addrs []net.Addr) (action Action) {
-		wake = wakefn
+	events.Serving = func(ctxin Context) (action Action) {
+		ctx = ctxin
 		go func() {
 			conn, err := net.Dial(network, addr)
 			must(err)
@@ -626,7 +626,7 @@ func testTranslate(network, addr string, kind string, stdlib bool) {
 		out = []byte("sweetness\r\n")
 		return
 	}
-	events.Serving = func(wakefn func(id int) bool, addrs []net.Addr) (action Action) {
+	events.Serving = func(ctx Context) (action Action) {
 		go func() {
 			conn, err := net.Dial(network, addr)
 			must(err)
@@ -641,7 +641,6 @@ func testTranslate(network, addr string, kind string, stdlib bool) {
 			if string(packet) != string(line) {
 				panic(fmt.Sprintf("expected '%v', got '%v'\n", line, packet))
 			}
-
 			for i := 0; i < 100; i++ {
 				line := fmt.Sprintf("hello %d\r\n", i)
 				n, err := conn.Write([]byte(line))

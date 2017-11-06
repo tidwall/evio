@@ -74,7 +74,7 @@ func Translate(
 	translate func(id int, rd io.ReadWriter) io.ReadWriter,
 ) Events {
 	tevents := events
-	var wake func(id int) bool
+	var ctx Context
 	var mu sync.Mutex
 	idc := make(map[int]*tconn)
 	get := func(id int) *tconn {
@@ -152,7 +152,7 @@ func Translate(
 					c.cond[st].L.Lock()
 					c.postbuf[st] = append(c.postbuf[st], packet[:n]...)
 					c.cond[st].L.Unlock()
-					wake(id)
+					ctx.Wake(id)
 				}
 			}(st, wr)
 		}
@@ -180,10 +180,10 @@ func Translate(
 		c.mu.Unlock()
 		return err
 	}
-	tevents.Serving = func(wakefn func(id int) bool, addrs []net.Addr) (action Action) {
-		wake = wakefn
+	tevents.Serving = func(ctxin Context) (action Action) {
+		ctx = ctxin
 		if events.Serving != nil {
-			action = events.Serving(wakefn, addrs)
+			action = events.Serving(ctx)
 		}
 		return
 	}
@@ -200,7 +200,7 @@ func Translate(
 			if len(out) > 0 {
 				c.write(1, out)
 				out = nil
-				wake(id)
+				ctx.Wake(id)
 			}
 		}
 		return
@@ -230,7 +230,7 @@ func Translate(
 			// wake up
 			out = c.read(1)
 			if len(out) > 0 {
-				wake(id)
+				ctx.Wake(id)
 				return
 			}
 			if c.action != None {
@@ -244,7 +244,7 @@ func Translate(
 						c.write(1, out)
 						out = nil
 					}
-					wake(id)
+					ctx.Wake(id)
 				}
 				return
 			}

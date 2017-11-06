@@ -42,6 +42,14 @@ type Addr struct {
 	Remote net.Addr
 }
 
+// Context represents a server context which provides information about the
+// running server and has control functions for managing some state
+type Context struct {
+	Addrs  []net.Addr
+	Wake   func(id int) bool
+	Attach func(v interface{}) error
+}
+
 // Events represents the server events for the Serve call.
 // Each event has an Action return value that is used manage the state
 // of the connection and server.
@@ -51,13 +59,14 @@ type Events struct {
 	// a Data event (with a nil `in` parameter) for the specified id.
 	// The addrs parameter is an array of listening addresses that align
 	// with the addr strings passed to the Serve function.
-	Serving func(wake func(id int) bool, addrs []net.Addr) (action Action)
+	Serving func(c Context) (action Action)
 	// Opened fires when a new connection has opened.
 	// The addr parameter is the connection's local and remote addresses.
 	// Use the out return value to write data to the connection.
 	// The opts return value is used to set connection options.
-	Opened func(id int, addr Addr) (out []byte, opts Options, action Action)
-	// Opened fires when a connection has closed.
+	Opened   func(id int, addr Addr) (out []byte, opts Options, action Action)
+	Attached func(id int, v interface{}) (out []byte, opts Options, action Action)
+	// Closed fires when a connection has closed.
 	// The err parameter is the last known connection error, usually nil.
 	Closed func(id int, err error) (action Action)
 	// Detached fires when a connection has been previously detached.

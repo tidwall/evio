@@ -65,6 +65,7 @@ type unixConn struct {
 	wake      bool
 	writeon   bool
 	detached  bool
+	attaching bool
 	closed    bool
 }
 
@@ -129,29 +130,96 @@ func serve(events Events, lns []*listener) error {
 	unlock := func() { mu.Unlock() }
 	fdconn := make(map[int]*unixConn)
 	idconn := make(map[int]*unixConn)
-	wake := func(id int) bool {
-		var ok = true
-		var err error
-		lock()
-		c := idconn[id]
-		if c == nil {
-			ok = false
-		} else if !c.wake {
-			c.wake = true
-			err = internal.AddWrite(c.p, c.fd, &c.writeon)
-		}
-		unlock()
-		if err != nil {
-			panic(err)
-		}
-		return ok
+	var id int
+	ctx := Context{
+		Wake: func(id int) bool {
+			var ok = true
+			var err error
+			lock()
+			c := idconn[id]
+			if c == nil {
+				ok = false
+			} else if !c.wake {
+				c.wake = true
+				err = internal.AddWrite(c.p, c.fd, &c.writeon)
+			}
+			unlock()
+			if err != nil {
+				panic(err)
+			}
+			return ok
+		},
+		Attach: func(v interface{}) error {
+			var fd int
+			var err error
+			switch v := v.(type) {
+			default:
+				return errors.New("invalid type")
+			case *net.TCPConn:
+				f, err := v.File()
+				if err != nil {
+					return err
+				}
+				fd = int(f.Fd())
+			case *net.UnixConn:
+				f, err := v.File()
+				if err != nil {
+					return err
+				}
+				fd = int(f.Fd())
+			case *os.File:
+				fd = int(v.Fd())
+			case int:
+				fd = v
+			case uintptr:
+				fd = int(v)
+			}
+			err = syscall.SetNonblock(fd, true)
+			if err != nil {
+				println(456)
+				return err
+			}
+			lock()
+			err = internal.AddRead(p, fd)
+			if err != nil {
+				unlock()
+				return err
+			}
+			id++
+			c := &unixConn{id: id, fd: fd, p: p}
+			c.attaching = true
+			fdconn[fd] = c
+			idconn[id] = c
+			if events.Attached != nil {
+				unlock()
+				out, opts, action := events.Attached(id, v)
+				lock()
+				if opts.TCPKeepAlive > 0 {
+					internal.SetKeepAlive(fd, int(c.opts.TCPKeepAlive/time.Second))
+				}
+				c.action = action
+				if len(out) > 0 {
+					c.outbuf = append(c.outbuf, out...)
+				}
+			}
+			// if len(c.outbuf) > 0 || c.action != None {
+			err = internal.AddWrite(p, fd, &c.writeon)
+			if err != nil {
+				unlock()
+				panic(err)
+			}
+			// }
+			unlock()
+			// println("---")
+			return nil
+		},
+	}
+	ctx.Addrs = make([]net.Addr, len(lns))
+	for i, ln := range lns {
+		ctx.Addrs[i] = ln.naddr
 	}
 	if events.Serving != nil {
-		addrs := make([]net.Addr, len(lns))
-		for i, ln := range lns {
-			addrs[i] = ln.naddr
-		}
-		switch events.Serving(wake, addrs) {
+		switch events.Serving(ctx) {
 		case Shutdown:
 			return nil
 		}
@@ -179,7 +247,6 @@ func serve(events Events, lns []*listener) error {
 		}
 		unlock()
 	}()
-	var id int
 	var packet [0xFFFF]byte
 	var evs = internal.MakeEvents(64)
 	var lastTicker time.Time
@@ -223,6 +290,25 @@ func serve(events Events, lns []*listener) error {
 			if c == nil {
 				syscall.Close(fd)
 				goto next
+			}
+			if c.attaching {
+				println(fd)
+				goto next
+				// opt, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_ERROR)
+				// if opt != 0 {
+
+				// }
+				// fmt.Printf(">> %v %v\n", opt, err)
+				switch evs.([]syscall.Kevent_t)[i].Filter {
+				case syscall.EVFILT_WRITE:
+					println(123)
+					goto write
+				case syscall.EVFILT_READ:
+					println(456)
+					goto read
+				default:
+					goto next
+				}
 			}
 			goto read
 		accept:
@@ -308,6 +394,7 @@ func serve(events Events, lns []*listener) error {
 					}
 				}
 				if n == 0 || err != nil {
+					println("C")
 					if c.action == Shutdown {
 						goto close
 					}

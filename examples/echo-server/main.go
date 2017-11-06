@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
 
 	"github.com/tidwall/evio"
 )
@@ -19,7 +18,7 @@ func main() {
 	flag.Parse()
 
 	var events evio.Events
-	events.Serving = func(wake func(id int) bool, addrs []net.Addr) (action evio.Action) {
+	events.Serving = func(ctx evio.Context) (action evio.Action) {
 		log.Printf("echo server started on port %d", port)
 		return
 	}
