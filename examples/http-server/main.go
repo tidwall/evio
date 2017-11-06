@@ -89,7 +89,7 @@ func main() {
 		data := c.is.Begin(in)
 		if noparse && bytes.Contains(data, []byte("\r\n\r\n")) {
 			// for testing minimal single packet request -> response.
-			out = appendresp(nil, "200 OK", "", "Hello World!")
+			out = appendresp(nil, "200 OK", "", res)
 			return
 		}
 		// process the pipeline

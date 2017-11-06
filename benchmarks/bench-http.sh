@@ -17,7 +17,6 @@ trap cleanup EXIT
 mkdir -p bin
 $(pkill -9 net-http-server || printf "")
 $(pkill -9 fasthttp-server || printf "")
-$(pkill -9 iris-server || printf "")
 $(pkill -9 evio-http-server || printf "")
 
 function gobench {
@@ -34,6 +33,5 @@ function gobench {
 }
 
 gobench "GO STDLIB" bin/net-http-server net-http-server/main.go 8081
-gobench "IRIS" bin/iris-server iris-server/main.go 8082
 gobench "FASTHTTP" bin/fasthttp-server fasthttp-server/main.go 8083
 gobench "EVIO" bin/evio-http-server ../examples/http-server/main.go 8084
