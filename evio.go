@@ -32,9 +32,8 @@ type Options struct {
 	TCPKeepAlive time.Duration
 }
 
-// Conn represents a connection context which provides information
-// about the connection.
-type Conn struct {
+// Info represents a information about the connection
+type Info struct {
 	// Closing is true when the connection is about to close. Expect a Closed
 	// event to fire soon.
 	Closing bool
@@ -47,35 +46,39 @@ type Conn struct {
 }
 
 // Server represents a server context which provides information about the
-// running server and has control functions for managing some state
+// running server and has control functions for managing state.
 type Server struct {
 	// The addrs parameter is an array of listening addresses that align
 	// with the addr strings passed to the Serve function.
 	Addrs []net.Addr
 	// Wake is a goroutine-safe function that triggers a Data event
 	// (with a nil `in` parameter) for the specified id.
-	Wake func(id int) bool
-	// Dial makes a connection to an external server and returns a new
-	// connection id. The new connection is added to the event loop and
-	// is managed exactly the same way as all the other connections.
-	Dial func(addr string, timeout time.Duration) (id int, err error)
+	Wake func(id int) (ok bool)
+	// Dial is a goroutine-safe function makes a connection to an external
+	// server and returns a new connection id. The new connection is added
+	// to the event loop and is managed exactly the same way as all the
+	// other connections. This operation only fails if the server/loop has
+	// been shut down. When `ok` is true there will always be exactly one
+	// Opened and one Closed event following this call. Look for socket
+	// errors from the Closed event.
+	Dial func(addr string, timeout time.Duration) (id int, ok bool)
 }
 
 // Events represents the server events for the Serve call.
 // Each event has an Action return value that is used manage the state
 // of the connection and server.
 type Events struct {
-	// Serving fires when the server can accept connections. The context
-	// parameter has various utilities that may help with managing the
-	// event loop.
-	Serving func(s Server) (action Action)
+	// Serving fires when the server can accept connections. The server
+	// parameter has information and various utilities.
+	Serving func(server Server) (action Action)
 	// Opened fires when a new connection has opened.
-	// The addr parameter is the connection's local and remote addresses.
+	// The info parameter has information about the connection such as
+	// it's local and remote address.
 	// Use the out return value to write data to the connection.
 	// The opts return value is used to set connection options.
-	Opened func(id int, c Conn) (out []byte, opts Options, action Action)
+	Opened func(id int, info Info) (out []byte, opts Options, action Action)
 	// Closed fires when a connection has closed.
-	// The err parameter is the last known connection error, usually nil.
+	// The err parameter is the last known connection error.
 	Closed func(id int, err error) (action Action)
 	// Detached fires when a connection has been previously detached.
 	// Once detached it's up to the receiver of this event to manage the
@@ -200,108 +203,3 @@ func parseAddr(addr string) (network, address string, stdlib bool) {
 	}
 	return
 }
-
-// // type timeoutHeap []timeoutHeapItem
-
-// // func (h timeoutHeap) Len() int           { return len(h) }
-// // func (h timeoutHeap) Less(i, j int) bool { return h[i].timeout < h[j].timeout }
-// // func (h timeoutHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-// // func (h *timeoutHeap) Push(x interface{}) {
-// // 	*h = append(*h, x.(timeoutHeapItem))
-// // }
-// // func (h *timeoutHeap) Pop() interface{} {
-// // 	old := *h
-// // 	n := len(old)
-// // 	x := old[n-1]
-// // 	*h = old[0 : n-1]
-// // 	return x
-// // }
-
-// type timeoutQueue struct {
-// 	h *timeoutHeap
-// }
-
-// func newTimeoutQueue() *timeoutQueue {
-// 	q := &timeoutQueue{&timeoutHeap{}}
-// 	heap.Init(q.h)
-// 	return q
-// }
-// func (q *timeoutQueue) len() int {
-// 	return q.h.Len()
-// }
-// func (q *timeoutQueue) push(id int, timeout int64) {
-// 	heap.Push(q.h, timeoutHeapItem{id: id, timeout: timeout})
-// }
-// func (q *timeoutQueue) peek() (id int, timeout int64) {
-// 	if q.len() > 0 {
-// 		id = (*(q.h))[0].id
-// 		timeout = (*(q.h))[0].timeout
-// 	}
-// 	return
-// }
-// func (q *timeoutQueue) pop() (id int, timeout int64) {
-// 	if q.len() > 0 {
-// 		item := q.h.Pop().(timeoutHeapItem)
-// 		id = item.id
-// 		timeout = item.timeout
-// 	}
-// 	return
-// }
-
-// // func init() {
-// // 	rand.Seed(time.Now().UnixNano())
-// // 	q := newTimeoutQueue()
-// // 	for i := 0; i < 1000; i++ {
-// // 		q.push(i, rand.Int63()%9000)
-// // 	}
-// // 	for q.len() > 0 {
-// // 		id, timeout := q.pop()
-// // 		fmt.Printf("%05d %05d\n", id, timeout)
-// // 	}
-// // }
-
-// type timeoutHeapItem struct {
-// 	id      int
-// 	timeout int64
-// }
-// type timeoutHeap []timeoutHeapItem
-
-// func (h timeoutHeap) Len() int           { return len(h) }
-// func (h timeoutHeap) Less(i, j int) bool { return h[i].timeout < h[j].timeout }
-// func (h timeoutHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-
-// func (h *timeoutHeap) Push(x interface{}) {
-// 	// Push and Pop use pointer receivers because they modify the slice's length,
-// 	// not just its contents.
-// 	*h = append(*h, x.(timeoutHeapItem))
-// }
-
-// func (h *timeoutHeap) Pop() interface{} {
-// 	old := *h
-// 	n := len(old)
-// 	x := old[n-1]
-// 	*h = old[0 : n-1]
-// 	return x
-// }
-
-// // This example inserts several ints into an IntHeap, checks the minimum,
-// // and removes them in order of priority.
-// func init() {
-// 	q := newTimeoutQueue()
-// 	rand.Seed(time.Now().UnixNano())
-// 	// h := &timeoutHeap{}
-// 	// heap.Init(h)
-
-// 	for i := 10; i < 20; i++ {
-// 		//heap.Push(h, timeoutHeapItem{i, rand.Int63() % 10})
-// 		q.push(i, rand.Int63()%10)
-// 	}
-// 	_, timeout := q.peek()
-// 	fmt.Printf("minimum: %d\n", timeout)
-// 	for q.len() > 0 {
-// 		//v := heap.Pop(h).(timeoutHeapItem)
-// 		_, timeout = q.pop()
-// 		fmt.Printf("%d ", timeout)
-// 	}
-// 	fmt.Printf("\n")
-// }

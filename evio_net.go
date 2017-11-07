@@ -166,7 +166,7 @@ func servenet(events Events, lns []*listener) error {
 						var action Action
 						mu.Lock()
 						if !done {
-							out, opts, action = events.Opened(id, Conn{
+							out, opts, action = events.Opened(id, Info{
 								AddrIndex:  lnidx,
 								LocalAddr:  conn.LocalAddr(),
 								RemoteAddr: conn.RemoteAddr(),

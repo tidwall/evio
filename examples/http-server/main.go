@@ -29,7 +29,7 @@ type request struct {
 }
 
 type conn struct {
-	addr evio.Addr
+	info evio.Info
 	is   evio.InputStream
 }
 
@@ -39,7 +39,8 @@ func main() {
 	var tlspem string
 	var aaaa bool
 	var noparse bool
-
+	var unixsocket string
+	flag.StringVar(&unixsocket, "unixsocket", "", "unix socket")
 	flag.IntVar(&port, "port", 8080, "server port")
 	flag.IntVar(&tlsport, "tlsport", 4443, "tls port")
 	flag.StringVar(&tlspem, "tlscert", "", "tls pem cert/key file")
@@ -60,16 +61,19 @@ func main() {
 	var events evio.Events
 	var conns = make(map[int]*conn)
 
-	events.Serving = func(ctx evio.Context) (action evio.Action) {
+	events.Serving = func(server evio.Server) (action evio.Action) {
 		log.Printf("http server started on port %d", port)
 		if tlspem != "" {
 			log.Printf("https server started on port %d", tlsport)
 		}
+		if unixsocket != "" {
+			log.Printf("http server started at %s", unixsocket)
+		}
 		return
 	}
 
-	events.Opened = func(id int, addr evio.Addr) (out []byte, opts evio.Options, action evio.Action) {
-		conns[id] = &conn{addr: addr}
+	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, action evio.Action) {
+		conns[id] = &conn{info: info}
 		//log.Printf("opened: %d: %s: %s", id, addr.Local.String(), addr.Remote.String())
 		return
 	}
@@ -82,6 +86,7 @@ func main() {
 	}
 
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
+		println(2)
 		if in == nil {
 			return
 		}
@@ -106,7 +111,7 @@ func main() {
 				break
 			}
 			// handle the request
-			req.remoteAddr = c.addr.Remote.String()
+			req.remoteAddr = c.info.RemoteAddr.String()
 			out = appendhandle(out, &req)
 			data = leftover
 		}
@@ -127,9 +132,9 @@ func main() {
 
 		// TLS translate the events
 		events = evio.Translate(events,
-			func(id int, addr evio.Addr) bool {
+			func(id int, info evio.Info) bool {
 				// only translate for the second address.
-				return addr.Index == 1
+				return info.AddrIndex == 1
 			},
 			func(id int, rw io.ReadWriter) io.ReadWriter {
 				// Use the standard Go crypto/tls package and create a tls.Conn
@@ -139,6 +144,9 @@ func main() {
 				return tls.Server(evio.NopConn(rw), config)
 			},
 		)
+	}
+	if unixsocket != "" {
+		addrs = append(addrs, fmt.Sprintf("unix://%s", unixsocket))
 	}
 	// Start serving!
 	log.Fatal(evio.Serve(events, addrs...))

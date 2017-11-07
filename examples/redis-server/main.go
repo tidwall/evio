@@ -41,7 +41,7 @@ func main() {
 		return
 	}
 	wgetids := make(map[int]time.Time)
-	events.Opened = func(id int, cn evio.Conn) (out []byte, opts evio.Options, action evio.Action) {
+	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, action evio.Action) {
 		c := &conn{}
 		if !wgetids[id].IsZero() {
 			delete(wgetids, id)
@@ -72,8 +72,8 @@ func main() {
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 		c := conns[id]
 		if c.wget {
-			println(string(in))
-			action = evio.Close
+			print(string(in))
+			//action = evio.Close
 			return
 		}
 		data := c.is.Begin(in)
@@ -102,12 +102,12 @@ func main() {
 					} else {
 						start := time.Now()
 						n, _ := strconv.ParseInt(string(args[2]), 10, 63)
-						cid, err := srv.Dial("tcp://"+string(args[1]), time.Duration(n)*time.Second)
-						if err != nil {
-							out = redcon.AppendError(out, err.Error())
+						cid, ok := srv.Dial("unix://"+string(args[1]), time.Duration(n)*time.Second)
+						if !ok {
+							out = redcon.AppendError(out, "failed to dial")
 						} else {
-							wgetids[cid] = time.Now()
 							println(cid, time.Since(start).String())
+							wgetids[cid] = time.Now()
 							out = redcon.AppendOK(out)
 						}
 					}

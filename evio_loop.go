@@ -7,7 +7,6 @@
 package evio
 
 import (
-	"errors"
 	"net"
 	"os"
 	"sort"
@@ -34,12 +33,13 @@ func (ln *listener) close() {
 	}
 }
 
+// system takes the net listener and detaches it from it's parent
+// event loop, grabs the file descriptor, and makes it non-blocking.
 func (ln *listener) system() error {
 	var err error
 	switch netln := ln.ln.(type) {
 	default:
-		ln.close()
-		return errors.New("network not supported")
+		panic("invalid listener type")
 	case *net.TCPListener:
 		ln.f, err = netln.File()
 	case *net.UnixListener:
@@ -53,6 +53,8 @@ func (ln *listener) system() error {
 	return syscall.SetNonblock(ln.fd, true)
 }
 
+// unixConn represents the connection as the event loop sees it.
+// This is also becomes a detached connection.
 type unixConn struct {
 	id, fd   int
 	outbuf   []byte
@@ -61,6 +63,7 @@ type unixConn struct {
 	opts     Options
 	timeout  time.Time
 	err      error
+	dialerr  error
 	wake     bool
 	writeon  bool
 	detached bool
@@ -71,7 +74,6 @@ type unixConn struct {
 func (c *unixConn) Timeout() time.Time {
 	return c.timeout
 }
-
 func (c *unixConn) Read(p []byte) (n int, err error) {
 	return syscall.Read(c.fd, p)
 }
@@ -128,104 +130,109 @@ func serve(events Events, lns []*listener) error {
 		}
 	}
 	var mu sync.Mutex
+	var done bool
 	lock := func() { mu.Lock() }
 	unlock := func() { mu.Unlock() }
 	fdconn := make(map[int]*unixConn)
 	idconn := make(map[int]*unixConn)
-
 	timeoutqueue := internal.NewTimeoutQueue()
 	var id int
-	ctx := Server{
-		Wake: func(id int) bool {
-			var ok = true
-			var err error
-			lock()
-			c := idconn[id]
-			if c == nil {
-				ok = false
-			} else if !c.wake {
-				c.wake = true
-				err = internal.AddWrite(p, c.fd, &c.writeon)
-			}
+	dial := func(addr string, timeout time.Duration) (int, bool) {
+		lock()
+		if done {
 			unlock()
-			if err != nil {
-				panic(err)
-			}
-			return ok
-		},
-		Dial: func(addr string, timeout time.Duration) (int, error) {
-			network, address, _ := parseAddr(addr)
-			var taddr net.Addr
-			var err error
-			switch network {
-			default:
-				return 0, errors.New("invalid network")
-			case "unix":
-			case "tcp", "tcp4", "tcp6":
-				taddr, err = net.ResolveTCPAddr(network, address)
+			return 0, false
+		}
+		id++
+		c := &unixConn{id: id, opening: true}
+		idconn[id] = c
+		if timeout != 0 {
+			c.timeout = time.Now().Add(timeout)
+			timeoutqueue.Push(c)
+		}
+		unlock()
+		// resolving an address blocks and we don't want blocking, like ever.
+		// but since we're leaving the event loop we'll need to complete the
+		// socket connection in a goroutine and add the read and write events
+		// to the loop to get back into the loop.
+		go func() {
+			err := func() error {
+				sa, err := resolve(addr)
 				if err != nil {
-					return 0, err
+					return err
 				}
-			}
-			var fd int
-			var sa syscall.Sockaddr
-			switch taddr := taddr.(type) {
-			case *net.UnixAddr:
-				sa = &syscall.SockaddrUnix{Name: taddr.Name}
-			case *net.TCPAddr:
-				if len(taddr.IP) == 4 {
-					var sa4 syscall.SockaddrInet4
-					copy(sa4.Addr[:], taddr.IP[:])
-					sa4.Port = taddr.Port
-					sa = &sa4
+				var fd int
+				switch sa.(type) {
+				case *syscall.SockaddrUnix:
+					fd, err = syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+				case *syscall.SockaddrInet4:
 					fd, err = syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
-				} else if len(taddr.IP) == 16 {
-					var sa6 syscall.SockaddrInet6
-					copy(sa6.Addr[:], taddr.IP[:])
-					sa6.Port = taddr.Port
-					sa = &sa6
+				case *syscall.SockaddrInet6:
 					fd, err = syscall.Socket(syscall.AF_INET6, syscall.SOCK_STREAM, 0)
-				} else {
-					return 0, errors.New("invalid network")
 				}
-			}
-			if err != nil {
-				return 0, err
-			}
-			if err := syscall.SetNonblock(fd, true); err != nil {
-				syscall.Close(fd)
-				return 0, err
-			}
-			err = syscall.Connect(fd, sa)
-			if err != nil && err != syscall.EINPROGRESS {
-				syscall.Close(fd)
-				return 0, err
-			}
-			lock()
-			err = internal.AddRead(p, fd)
-			if err != nil {
+				err = syscall.Connect(fd, sa)
+				if err != nil && err != syscall.EINPROGRESS {
+					syscall.Close(fd)
+					return err
+				}
+				if err := syscall.SetNonblock(fd, true); err != nil {
+					syscall.Close(fd)
+					return err
+				}
+				lock()
+				err = internal.AddRead(p, fd)
+				if err != nil {
+					unlock()
+					syscall.Close(fd)
+					return err
+				}
+				err = internal.AddWrite(p, fd, &c.writeon)
+				if err != nil {
+					unlock()
+					syscall.Close(fd)
+					return err
+				}
+				c.fd = fd
+				fdconn[fd] = c
 				unlock()
-				syscall.Close(fd)
-				return 0, err
-			}
-			id++
-			c := &unixConn{id: id, fd: fd, opening: true}
-			err = internal.AddWrite(p, fd, &c.writeon)
+				return nil
+			}()
 			if err != nil {
-				unlock()
-				syscall.Close(fd)
-				return 0, err
-			}
-			fdconn[fd] = c
-			idconn[id] = c
-			if timeout != 0 {
-				c.timeout = time.Now().Add(timeout)
+				// set a dial error and timeout right away
+				lock()
+				c.dialerr = err
+				c.timeout = time.Now()
 				timeoutqueue.Push(c)
+				unlock()
 			}
-			unlock()
-			return id, nil
-		},
+
+		}()
+		return id, true
 	}
+
+	// wake wakes up a connection
+	wake := func(id int) bool {
+		var ok = true
+		var err error
+		lock()
+		if done {
+			unlock()
+			return false
+		}
+		c := idconn[id]
+		if c == nil || c.fd == 0 {
+			ok = false
+		} else if !c.wake {
+			c.wake = true
+			err = internal.AddWrite(p, c.fd, &c.writeon)
+		}
+		unlock()
+		if err != nil {
+			panic(err)
+		}
+		return ok
+	}
+	ctx := Server{Wake: wake, Dial: dial}
 	ctx.Addrs = make([]net.Addr, len(lns))
 	for i, ln := range lns {
 		ctx.Addrs[i] = ln.naddr
@@ -238,25 +245,28 @@ func serve(events Events, lns []*listener) error {
 	}
 	defer func() {
 		lock()
+		done = true
 		type fdid struct {
 			fd, id  int
 			opening bool
 		}
 		var fdids []fdid
-		for fd, c := range fdconn {
-			fdids = append(fdids, fdid{fd, c.id, c.opening})
+		for _, c := range idconn {
+			fdids = append(fdids, fdid{c.fd, c.id, c.opening})
 		}
 		sort.Slice(fdids, func(i, j int) bool {
 			return fdids[j].id < fdids[i].id
 		})
 		for _, fdid := range fdids {
-			syscall.Close(fdid.fd)
+			if fdid.fd != 0 {
+				syscall.Close(fdid.fd)
+			}
 			if fdid.opening {
 				if events.Opened != nil {
 					laddr := getlocaladdr(fdid.fd)
 					raddr := getremoteaddr(fdid.fd)
 					unlock()
-					events.Opened(fdid.id, Conn{
+					events.Opened(fdid.id, Info{
 						Closing:    true,
 						AddrIndex:  -1,
 						LocalAddr:  laddr,
@@ -272,6 +282,8 @@ func serve(events Events, lns []*listener) error {
 			}
 		}
 		syscall.Close(p)
+		fdconn = nil
+		idconn = nil
 		unlock()
 	}()
 	var packet [0xFFFF]byte
@@ -288,23 +300,21 @@ func serve(events Events, lns []*listener) error {
 		if err != nil && err != syscall.EINTR {
 			return err
 		}
-		if events.Tick != nil {
-			remain := nextTicker.Sub(time.Now())
-			if remain < 0 {
-				var tickerDelay time.Duration
-				var action Action
-				if events.Tick != nil {
-					tickerDelay, action = events.Tick()
-					if action == Shutdown {
-						return nil
-					}
-				} else {
-					tickerDelay = time.Hour
+		remain := nextTicker.Sub(time.Now())
+		if remain < 0 {
+			var tickerDelay time.Duration
+			var action Action
+			if events.Tick != nil {
+				tickerDelay, action = events.Tick()
+				if action == Shutdown {
+					return nil
 				}
-				nextTicker = time.Now().Add(tickerDelay + remain)
+			} else {
+				tickerDelay = time.Hour
 			}
+			nextTicker = time.Now().Add(tickerDelay + remain)
 		}
-		// check timeouts
+		// check for dial connection timeouts
 		if timeoutqueue.Len() > 0 {
 			var count int
 			now := time.Now()
@@ -316,14 +326,14 @@ func serve(events Events, lns []*listener) error {
 				c := v.(*unixConn)
 				if now.After(v.Timeout()) {
 					timeoutqueue.Pop()
-					if _, ok := idconn[c.id]; ok {
+					if _, ok := idconn[c.id]; ok && c.opening {
 						delete(idconn, c.id)
 						delete(fdconn, c.fd)
 						syscall.Close(c.fd)
 						if events.Opened != nil {
 							laddr := getlocaladdr(c.fd)
 							raddr := getremoteaddr(c.fd)
-							events.Opened(c.id, Conn{
+							events.Opened(c.id, Info{
 								Closing:    true,
 								AddrIndex:  -1,
 								LocalAddr:  laddr,
@@ -331,7 +341,11 @@ func serve(events Events, lns []*listener) error {
 							})
 						}
 						if events.Closed != nil {
-							events.Closed(c.id, syscall.ETIMEDOUT)
+							if c.dialerr != nil {
+								events.Closed(c.id, c.dialerr)
+							} else {
+								events.Closed(c.id, syscall.ETIMEDOUT)
+							}
 						}
 						count++
 					}
@@ -392,7 +406,7 @@ func serve(events Events, lns []*listener) error {
 				laddr := getlocaladdr(fd)
 				raddr := getremoteaddr(fd)
 				unlock()
-				out, c.opts, c.action = events.Opened(c.id, Conn{
+				out, c.opts, c.action = events.Opened(c.id, Info{
 					AddrIndex:  lnidx,
 					LocalAddr:  laddr,
 					RemoteAddr: raddr,
@@ -543,10 +557,16 @@ func serve(events Events, lns []*listener) error {
 }
 
 func getlocaladdr(fd int) net.Addr {
+	if fd == 0 {
+		return nil
+	}
 	sa, _ := syscall.Getsockname(fd)
 	return getaddr(sa)
 }
 func getremoteaddr(fd int) net.Addr {
+	if fd == 0 {
+		return nil
+	}
 	sa, _ := syscall.Getpeername(fd)
 	return getaddr(sa)
 }
@@ -561,4 +581,40 @@ func getaddr(sa syscall.Sockaddr) net.Addr {
 	case *syscall.SockaddrUnix:
 		return &net.UnixAddr{Net: "unix", Name: sa.Name}
 	}
+}
+
+// resolve resolves an evio address and retuns a sockaddr for socket
+// connection to external servers.
+func resolve(addr string) (sa syscall.Sockaddr, err error) {
+	network, address, _ := parseAddr(addr)
+	var taddr net.Addr
+	switch network {
+	default:
+		return nil, net.UnknownNetworkError(network)
+	case "unix":
+		taddr = &net.UnixAddr{Net: "unix", Name: address}
+	case "tcp", "tcp4", "tcp6":
+		// use the stdlib resolver because it's good.
+		taddr, err = net.ResolveTCPAddr(network, address)
+		if err != nil {
+			return nil, err
+		}
+	}
+	switch taddr := taddr.(type) {
+	case *net.UnixAddr:
+		sa = &syscall.SockaddrUnix{Name: taddr.Name}
+	case *net.TCPAddr:
+		if len(taddr.IP) == 4 {
+			var sa4 syscall.SockaddrInet4
+			copy(sa4.Addr[:], taddr.IP[:])
+			sa4.Port = taddr.Port
+			sa = &sa4
+		} else if len(taddr.IP) == 16 {
+			var sa6 syscall.SockaddrInet6
+			copy(sa6.Addr[:], taddr.IP[:])
+			sa6.Port = taddr.Port
+			sa = &sa6
+		}
+	}
+	return sa, nil
 }

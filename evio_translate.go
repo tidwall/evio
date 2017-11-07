@@ -70,7 +70,7 @@ func NopConn(rw io.ReadWriter) net.Conn {
 // that performs the actual translation.
 func Translate(
 	events Events,
-	should func(id int, conn Conn) bool,
+	should func(id int, info Info) bool,
 	translate func(id int, rd io.ReadWriter) io.ReadWriter,
 ) Events {
 	tevents := events
@@ -187,16 +187,16 @@ func Translate(
 		}
 		return
 	}
-	tevents.Opened = func(id int, conn Conn) (out []byte, opts Options, action Action) {
-		if should != nil && !should(id, conn) {
+	tevents.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
+		if should != nil && !should(id, info) {
 			if events.Opened != nil {
-				out, opts, action = events.Opened(id, conn)
+				out, opts, action = events.Opened(id, info)
 			}
 			return
 		}
 		c := create(id)
 		if events.Opened != nil {
-			out, opts, c.action = events.Opened(id, conn)
+			out, opts, c.action = events.Opened(id, info)
 			if len(out) > 0 {
 				c.write(1, out)
 				out = nil
