@@ -32,40 +32,48 @@ type Options struct {
 	TCPKeepAlive time.Duration
 }
 
-// Addr represents the connection's remote and local addresses.
-type Addr struct {
-	// Index is the index of server address that was passed to the Serve call.
-	Index int
-	// Local is the connection's local socket address.
-	Local net.Addr
-	// Local is the connection's remote peer address.
-	Remote net.Addr
+// Conn represents a connection context which provides information
+// about the connection.
+type Conn struct {
+	// Closing is true when the connection is about to close. Expect a Closed
+	// event to fire soon.
+	Closing bool
+	// AddrIndex is the index of server address that was passed to the Serve call.
+	AddrIndex int
+	// LocalAddr is the connection's local socket address.
+	LocalAddr net.Addr
+	// RemoteAddr is the connection's remote peer address.
+	RemoteAddr net.Addr
 }
 
-// Context represents a server context which provides information about the
+// Server represents a server context which provides information about the
 // running server and has control functions for managing some state
-type Context struct {
-	Addrs  []net.Addr
-	Wake   func(id int) bool
-	Attach func(v interface{}) error
+type Server struct {
+	// The addrs parameter is an array of listening addresses that align
+	// with the addr strings passed to the Serve function.
+	Addrs []net.Addr
+	// Wake is a goroutine-safe function that triggers a Data event
+	// (with a nil `in` parameter) for the specified id.
+	Wake func(id int) bool
+	// Dial makes a connection to an external server and returns a new
+	// connection id. The new connection is added to the event loop and
+	// is managed exactly the same way as all the other connections.
+	Dial func(addr string, timeout time.Duration) (id int, err error)
 }
 
 // Events represents the server events for the Serve call.
 // Each event has an Action return value that is used manage the state
 // of the connection and server.
 type Events struct {
-	// Serving fires when the server can accept connections.
-	// The wake parameter is a goroutine-safe function that triggers
-	// a Data event (with a nil `in` parameter) for the specified id.
-	// The addrs parameter is an array of listening addresses that align
-	// with the addr strings passed to the Serve function.
-	Serving func(c Context) (action Action)
+	// Serving fires when the server can accept connections. The context
+	// parameter has various utilities that may help with managing the
+	// event loop.
+	Serving func(s Server) (action Action)
 	// Opened fires when a new connection has opened.
 	// The addr parameter is the connection's local and remote addresses.
 	// Use the out return value to write data to the connection.
 	// The opts return value is used to set connection options.
-	Opened   func(id int, addr Addr) (out []byte, opts Options, action Action)
-	Attached func(id int, v interface{}) (out []byte, opts Options, action Action)
+	Opened func(id int, c Conn) (out []byte, opts Options, action Action)
 	// Closed fires when a connection has closed.
 	// The err parameter is the last known connection error, usually nil.
 	Closed func(id int, err error) (action Action)
@@ -116,14 +124,11 @@ func Serve(events Events, addr ...string) error {
 	}()
 	var stdlib bool
 	for _, addr := range addr {
-		ln := listener{network: "tcp", addr: addr}
-		if strings.Contains(addr, "://") {
-			ln.network = strings.Split(addr, "://")[0]
-			ln.addr = strings.Split(addr, "://")[1]
-		}
-		if strings.HasSuffix(ln.network, "-net") {
+		var ln listener
+		var stdlibt bool
+		ln.network, ln.addr, stdlibt = parseAddr(addr)
+		if stdlibt {
 			stdlib = true
-			ln.network = ln.network[:len(ln.network)-4]
 		}
 		if ln.network == "unix" {
 			os.RemoveAll(ln.addr)
@@ -181,3 +186,122 @@ type listener struct {
 	addr    string
 	naddr   net.Addr
 }
+
+func parseAddr(addr string) (network, address string, stdlib bool) {
+	network = "tcp"
+	address = addr
+	if strings.Contains(address, "://") {
+		network = strings.Split(address, "://")[0]
+		address = strings.Split(address, "://")[1]
+	}
+	if strings.HasSuffix(network, "-net") {
+		stdlib = true
+		network = network[:len(network)-4]
+	}
+	return
+}
+
+// // type timeoutHeap []timeoutHeapItem
+
+// // func (h timeoutHeap) Len() int           { return len(h) }
+// // func (h timeoutHeap) Less(i, j int) bool { return h[i].timeout < h[j].timeout }
+// // func (h timeoutHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+// // func (h *timeoutHeap) Push(x interface{}) {
+// // 	*h = append(*h, x.(timeoutHeapItem))
+// // }
+// // func (h *timeoutHeap) Pop() interface{} {
+// // 	old := *h
+// // 	n := len(old)
+// // 	x := old[n-1]
+// // 	*h = old[0 : n-1]
+// // 	return x
+// // }
+
+// type timeoutQueue struct {
+// 	h *timeoutHeap
+// }
+
+// func newTimeoutQueue() *timeoutQueue {
+// 	q := &timeoutQueue{&timeoutHeap{}}
+// 	heap.Init(q.h)
+// 	return q
+// }
+// func (q *timeoutQueue) len() int {
+// 	return q.h.Len()
+// }
+// func (q *timeoutQueue) push(id int, timeout int64) {
+// 	heap.Push(q.h, timeoutHeapItem{id: id, timeout: timeout})
+// }
+// func (q *timeoutQueue) peek() (id int, timeout int64) {
+// 	if q.len() > 0 {
+// 		id = (*(q.h))[0].id
+// 		timeout = (*(q.h))[0].timeout
+// 	}
+// 	return
+// }
+// func (q *timeoutQueue) pop() (id int, timeout int64) {
+// 	if q.len() > 0 {
+// 		item := q.h.Pop().(timeoutHeapItem)
+// 		id = item.id
+// 		timeout = item.timeout
+// 	}
+// 	return
+// }
+
+// // func init() {
+// // 	rand.Seed(time.Now().UnixNano())
+// // 	q := newTimeoutQueue()
+// // 	for i := 0; i < 1000; i++ {
+// // 		q.push(i, rand.Int63()%9000)
+// // 	}
+// // 	for q.len() > 0 {
+// // 		id, timeout := q.pop()
+// // 		fmt.Printf("%05d %05d\n", id, timeout)
+// // 	}
+// // }
+
+// type timeoutHeapItem struct {
+// 	id      int
+// 	timeout int64
+// }
+// type timeoutHeap []timeoutHeapItem
+
+// func (h timeoutHeap) Len() int           { return len(h) }
+// func (h timeoutHeap) Less(i, j int) bool { return h[i].timeout < h[j].timeout }
+// func (h timeoutHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+// func (h *timeoutHeap) Push(x interface{}) {
+// 	// Push and Pop use pointer receivers because they modify the slice's length,
+// 	// not just its contents.
+// 	*h = append(*h, x.(timeoutHeapItem))
+// }
+
+// func (h *timeoutHeap) Pop() interface{} {
+// 	old := *h
+// 	n := len(old)
+// 	x := old[n-1]
+// 	*h = old[0 : n-1]
+// 	return x
+// }
+
+// // This example inserts several ints into an IntHeap, checks the minimum,
+// // and removes them in order of priority.
+// func init() {
+// 	q := newTimeoutQueue()
+// 	rand.Seed(time.Now().UnixNano())
+// 	// h := &timeoutHeap{}
+// 	// heap.Init(h)
+
+// 	for i := 10; i < 20; i++ {
+// 		//heap.Push(h, timeoutHeapItem{i, rand.Int63() % 10})
+// 		q.push(i, rand.Int63()%10)
+// 	}
+// 	_, timeout := q.peek()
+// 	fmt.Printf("minimum: %d\n", timeout)
+// 	for q.len() > 0 {
+// 		//v := heap.Pop(h).(timeoutHeapItem)
+// 		_, timeout = q.pop()
+// 		fmt.Printf("%d ", timeout)
+// 	}
+// 	fmt.Printf("\n")
+// }

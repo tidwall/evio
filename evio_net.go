@@ -68,7 +68,7 @@ func servenet(events Events, lns []*listener) error {
 	var cmu sync.Mutex
 	var idconn = make(map[int]*netConn)
 	var done bool
-	ctx := Context{
+	ctx := Server{
 		Wake: func(id int) bool {
 			cmu.Lock()
 			c := idconn[id]
@@ -166,7 +166,11 @@ func servenet(events Events, lns []*listener) error {
 						var action Action
 						mu.Lock()
 						if !done {
-							out, opts, action = events.Opened(id, Addr{lnidx, conn.LocalAddr(), conn.RemoteAddr()})
+							out, opts, action = events.Opened(id, Conn{
+								AddrIndex:  lnidx,
+								LocalAddr:  conn.LocalAddr(),
+								RemoteAddr: conn.RemoteAddr(),
+							})
 						}
 						mu.Unlock()
 						if opts.TCPKeepAlive > 0 {

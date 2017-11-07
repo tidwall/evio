@@ -70,11 +70,11 @@ func NopConn(rw io.ReadWriter) net.Conn {
 // that performs the actual translation.
 func Translate(
 	events Events,
-	should func(id int, addr Addr) bool,
+	should func(id int, conn Conn) bool,
 	translate func(id int, rd io.ReadWriter) io.ReadWriter,
 ) Events {
 	tevents := events
-	var ctx Context
+	var ctx Server
 	var mu sync.Mutex
 	idc := make(map[int]*tconn)
 	get := func(id int) *tconn {
@@ -180,23 +180,23 @@ func Translate(
 		c.mu.Unlock()
 		return err
 	}
-	tevents.Serving = func(ctxin Context) (action Action) {
+	tevents.Serving = func(ctxin Server) (action Action) {
 		ctx = ctxin
 		if events.Serving != nil {
 			action = events.Serving(ctx)
 		}
 		return
 	}
-	tevents.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
-		if should != nil && !should(id, addr) {
+	tevents.Opened = func(id int, conn Conn) (out []byte, opts Options, action Action) {
+		if should != nil && !should(id, conn) {
 			if events.Opened != nil {
-				out, opts, action = events.Opened(id, addr)
+				out, opts, action = events.Opened(id, conn)
 			}
 			return
 		}
 		c := create(id)
 		if events.Opened != nil {
-			out, opts, c.action = events.Opened(id, addr)
+			out, opts, c.action = events.Opened(id, conn)
 			if len(out) > 0 {
 				c.write(1, out)
 				out = nil
