@@ -18,11 +18,11 @@ func main() {
 	flag.Parse()
 
 	var events evio.Events
-	events.Serving = func(ctx evio.Context) (action evio.Action) {
+	events.Serving = func(srv evio.Server) (action evio.Action) {
 		log.Printf("echo server started on port %d", port)
 		return
 	}
-	events.Opened = func(id int, addr evio.Addr) (out []byte, opts evio.Options, action evio.Action) {
+	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, action evio.Action) {
 		//log.Printf("opened: %d: %s", id, addr.Remote.String())
 		return
 	}
