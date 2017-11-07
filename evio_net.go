@@ -63,11 +63,192 @@ func (c *netConn) Close() error {
 
 // servenet uses the stdlib net package instead of syscalls.
 func servenet(events Events, lns []*listener) error {
-	var id int64
+	var idc int64
 	var mu sync.Mutex
 	var cmu sync.Mutex
 	var idconn = make(map[int]*netConn)
-	var done bool
+	var done int64
+	var shutdown func(err error)
+
+	// connloop handles an individual connection
+	connloop := func(id int, conn net.Conn, lnidx int, ln net.Listener) {
+		var closed bool
+		defer func() {
+			if !closed {
+				conn.Close()
+			}
+		}()
+		var packet [0xFFFF]byte
+		var cout []byte
+		var caction Action
+		c := &netConn{id: id, conn: conn}
+		cmu.Lock()
+		idconn[id] = c
+		cmu.Unlock()
+		if events.Opened != nil {
+			var out []byte
+			var opts Options
+			var action Action
+			mu.Lock()
+			if atomic.LoadInt64(&done) == 0 {
+				out, opts, action = events.Opened(id, Info{
+					AddrIndex:  lnidx,
+					LocalAddr:  conn.LocalAddr(),
+					RemoteAddr: conn.RemoteAddr(),
+				})
+			}
+			mu.Unlock()
+			if opts.TCPKeepAlive > 0 {
+				if conn, ok := conn.(*net.TCPConn); ok {
+					conn.SetKeepAlive(true)
+					conn.SetKeepAlivePeriod(opts.TCPKeepAlive)
+				}
+			}
+			if len(out) > 0 {
+				cout = append(cout, out...)
+			}
+			caction = action
+		}
+		for {
+			var n int
+			var err error
+			var out []byte
+			var action Action
+			if caction != None {
+				goto write
+			}
+			if len(cout) > 0 || atomic.LoadInt64(&c.wake) != 0 {
+				conn.SetReadDeadline(time.Now().Add(time.Microsecond))
+			} else {
+				conn.SetReadDeadline(time.Now().Add(time.Second))
+			}
+			n, err = c.Read(packet[:])
+			if err != nil && !istimeout(err) {
+				if err != io.EOF {
+					c.err = err
+				}
+				goto close
+			}
+
+			if n > 0 {
+				if events.Data != nil {
+					mu.Lock()
+					if atomic.LoadInt64(&done) == 0 {
+						out, action = events.Data(id, append([]byte{}, packet[:n]...))
+					}
+					mu.Unlock()
+				}
+			} else if atomic.LoadInt64(&c.wake) != 0 {
+				atomic.StoreInt64(&c.wake, 0)
+				if events.Data != nil {
+					mu.Lock()
+					if atomic.LoadInt64(&done) == 0 {
+						out, action = events.Data(id, nil)
+					}
+					mu.Unlock()
+				}
+			}
+			if len(out) > 0 {
+				cout = append(cout, out...)
+			}
+			caction = action
+			goto write
+		write:
+			if len(cout) > 0 {
+				if events.Prewrite != nil {
+					mu.Lock()
+					if atomic.LoadInt64(&done) == 0 {
+						action = events.Prewrite(id, len(cout))
+					}
+					mu.Unlock()
+					if action == Shutdown {
+						caction = Shutdown
+					}
+				}
+				conn.SetWriteDeadline(time.Now().Add(time.Microsecond))
+				n, err := c.Write(cout)
+				if err != nil && !istimeout(err) {
+					if err != io.EOF {
+						c.err = err
+					}
+					goto close
+				}
+				cout = cout[n:]
+				if len(cout) == 0 {
+					cout = nil
+				}
+				if events.Postwrite != nil {
+					mu.Lock()
+					if atomic.LoadInt64(&done) == 0 {
+						action = events.Postwrite(id, n, len(cout))
+					}
+					mu.Unlock()
+					if action == Shutdown {
+						caction = Shutdown
+					}
+				}
+			}
+			if caction == Shutdown {
+				goto close
+			}
+			if len(cout) == 0 {
+				if caction != None {
+					goto close
+				}
+			}
+			continue
+		close:
+			cmu.Lock()
+			delete(idconn, c.id)
+			cmu.Unlock()
+			mu.Lock()
+			if atomic.LoadInt64(&done) != 0 {
+				mu.Unlock()
+				return
+			}
+			mu.Unlock()
+			if caction == Detach {
+				if events.Detached != nil {
+					if len(cout) > 0 {
+						c.outbuf = cout
+					}
+					c.detached = true
+					conn.SetDeadline(time.Time{})
+					mu.Lock()
+					if atomic.LoadInt64(&done) == 0 {
+						caction = events.Detached(c.id, c)
+					}
+					mu.Unlock()
+					closed = true
+					if caction == Shutdown {
+						goto fail
+					}
+					return
+				}
+			}
+			conn.Close()
+			if events.Closed != nil {
+				var action Action
+				mu.Lock()
+				if atomic.LoadInt64(&done) == 0 {
+					action = events.Closed(c.id, c.err)
+				}
+				mu.Unlock()
+				if action == Shutdown {
+					caction = Shutdown
+				}
+			}
+			closed = true
+			if caction == Shutdown {
+				goto fail
+			}
+			return
+		fail:
+			shutdown(nil)
+			return
+		}
+	}
+
 	ctx := Server{
 		Wake: func(id int) bool {
 			cmu.Lock()
@@ -81,18 +262,57 @@ func servenet(events Events, lns []*listener) error {
 			c.conn.SetDeadline(time.Time{}.Add(1))
 			return true
 		},
+		Dial: func(addr string, timeout time.Duration) int {
+			if atomic.LoadInt64(&done) != 0 {
+				return 0
+			}
+			id := int(atomic.AddInt64(&idc, 1))
+			go func() {
+				network, address, _ := parseAddr(addr)
+				var conn net.Conn
+				var err error
+				if timeout > 0 {
+					conn, err = net.DialTimeout(network, address, timeout)
+				} else {
+					conn, err = net.Dial(network, address)
+				}
+				if err != nil {
+					if events.Opened != nil {
+						mu.Lock()
+						_, _, action := events.Opened(id, Info{Closing: true, AddrIndex: -1})
+						mu.Unlock()
+						if action == Shutdown {
+							shutdown(nil)
+							return
+						}
+					}
+					if events.Closed != nil {
+						mu.Lock()
+						action := events.Closed(id, err)
+						mu.Unlock()
+						if action == Shutdown {
+							shutdown(nil)
+							return
+						}
+					}
+					return
+				}
+				go connloop(id, conn, -1, nil)
+			}()
+			return id
+		},
 	}
 	var swg sync.WaitGroup
 	swg.Add(1)
 	var ferr error
-	shutdown := func(err error) {
+	shutdown = func(err error) {
 		mu.Lock()
-		if done {
+		if atomic.LoadInt64(&done) != 0 {
 			mu.Unlock()
 			return
 		}
 		defer swg.Done()
-		done = true
+		atomic.StoreInt64(&done, 1)
 		ferr = err
 		for _, ln := range lns {
 			ln.ln.Close()
@@ -145,186 +365,15 @@ func servenet(events Events, lns []*listener) error {
 					}
 					return
 				}
-				id := int(atomic.AddInt64(&id, 1))
-				go func(id int, conn net.Conn) {
-					var closed bool
-					defer func() {
-						if !closed {
-							conn.Close()
-						}
-					}()
-					var packet [0xFFFF]byte
-					var cout []byte
-					var caction Action
-					c := &netConn{id: id, conn: conn}
-					cmu.Lock()
-					idconn[id] = c
-					cmu.Unlock()
-					if events.Opened != nil {
-						var out []byte
-						var opts Options
-						var action Action
-						mu.Lock()
-						if !done {
-							out, opts, action = events.Opened(id, Info{
-								AddrIndex:  lnidx,
-								LocalAddr:  conn.LocalAddr(),
-								RemoteAddr: conn.RemoteAddr(),
-							})
-						}
-						mu.Unlock()
-						if opts.TCPKeepAlive > 0 {
-							if conn, ok := conn.(*net.TCPConn); ok {
-								conn.SetKeepAlive(true)
-								conn.SetKeepAlivePeriod(opts.TCPKeepAlive)
-							}
-						}
-						if len(out) > 0 {
-							cout = append(cout, out...)
-						}
-						caction = action
-					}
-					for {
-						var n int
-						var out []byte
-						var action Action
-						if caction != None {
-							goto write
-						}
-						conn.SetReadDeadline(time.Now().Add(time.Microsecond))
-						n, err = c.Read(packet[:])
-						if err != nil && !istimeout(err) {
-							if err != io.EOF {
-								c.err = err
-							}
-							goto close
-						}
-						if n > 0 {
-							if events.Data != nil {
-								mu.Lock()
-								if !done {
-									out, action = events.Data(id, append([]byte{}, packet[:n]...))
-								}
-								mu.Unlock()
-							}
-						} else if atomic.LoadInt64(&c.wake) != 0 {
-							atomic.StoreInt64(&c.wake, 0)
-							if events.Data != nil {
-								mu.Lock()
-								if !done {
-									out, action = events.Data(id, nil)
-								}
-								mu.Unlock()
-							}
-						}
-						if len(out) > 0 {
-							cout = append(cout, out...)
-						}
-						caction = action
-						goto write
-					write:
-						if len(cout) > 0 {
-							if events.Prewrite != nil {
-								mu.Lock()
-								if !done {
-									action = events.Prewrite(id, len(cout))
-								}
-								mu.Unlock()
-								if action == Shutdown {
-									caction = Shutdown
-								}
-							}
-							conn.SetWriteDeadline(time.Now().Add(time.Microsecond))
-							n, err := c.Write(cout)
-							if err != nil && !istimeout(err) {
-								if err != io.EOF {
-									c.err = err
-								}
-								goto close
-							}
-							cout = cout[n:]
-							if len(cout) == 0 {
-								cout = nil
-							}
-							if events.Postwrite != nil {
-								mu.Lock()
-								if !done {
-									action = events.Postwrite(id, n, len(cout))
-								}
-								mu.Unlock()
-								if action == Shutdown {
-									caction = Shutdown
-								}
-							}
-						}
-						if caction == Shutdown {
-							goto close
-						}
-						if len(cout) == 0 {
-							if caction != None {
-								goto close
-							}
-						}
-						continue
-					close:
-						cmu.Lock()
-						delete(idconn, c.id)
-						cmu.Unlock()
-						mu.Lock()
-						if done {
-							mu.Unlock()
-							return
-						}
-						mu.Unlock()
-						if caction == Detach {
-							if events.Detached != nil {
-								if len(cout) > 0 {
-									c.outbuf = cout
-								}
-								c.detached = true
-								conn.SetDeadline(time.Time{})
-								mu.Lock()
-								if !done {
-									caction = events.Detached(c.id, c)
-								}
-								mu.Unlock()
-								closed = true
-								if caction == Shutdown {
-									goto fail
-								}
-								return
-							}
-						}
-						conn.Close()
-						if events.Closed != nil {
-							var action Action
-							mu.Lock()
-							if !done {
-								action = events.Closed(c.id, c.err)
-							}
-							mu.Unlock()
-							if action == Shutdown {
-								caction = Shutdown
-							}
-						}
-						closed = true
-						if caction == Shutdown {
-							goto fail
-						}
-						return
-					fail:
-						shutdown(nil)
-						return
-					}
-
-				}(id, conn)
+				id := int(atomic.AddInt64(&idc, 1))
+				go connloop(id, conn, lnidx, ln)
 			}
 		}(i, ln.ln)
 	}
 	go func() {
 		for {
 			mu.Lock()
-			if done {
+			if atomic.LoadInt64(&done) != 0 {
 				mu.Unlock()
 				break
 			}
@@ -333,7 +382,7 @@ func servenet(events Events, lns []*listener) error {
 			var action Action
 			mu.Lock()
 			if events.Tick != nil {
-				if !done {
+				if atomic.LoadInt64(&done) == 0 {
 					delay, action = events.Tick()
 				}
 			} else {

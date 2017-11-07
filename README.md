@@ -114,17 +114,17 @@ events.Tick = func() (delay time.Duration, action Action){
 
 ### Wake up
 
-A connection can be woken up using the `wake` function that is made available through the `Serving` event. This is useful for when you need to offload an operation to a background goroutine and then later notify the event loop that it's time to send some data.
+A connection can be woken up using the `Wake` function that is made available through the `Serving` event. This is useful for when you need to offload an operation to a background goroutine and then later notify the event loop that it's time to send some data.
 
 Example echo server that when encountering the line "exec" it waits 5 seconds before responding.
 
 ```go
-var wake func(id int) bool
+var srv evio.Server
 var mu sync.Mutex
 var execs = make(map[int]int)
 
-events.Serving = func(wakefn func(id int) bool, addrs []net.Addr) (action evio.Action) {
-	wake = wakefn // hang on to the wake function
+events.Serving = func(srvin evio.Server) (action evio.Action) {
+	srv = srvin // hang on to the server control, which has the Wake function
 	return
 }
 events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
@@ -143,7 +143,7 @@ events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 			mu.Lock()
 			execs[id]++
 			mu.Unlock()
-			wake(id)
+			srv.Wake(id)
 		}()
 	} else {
 		out = in
@@ -151,6 +151,41 @@ events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 	return
 }
 ```
+
+### Dialing out
+
+An outbound connection can created by using the `Dial` function that is 
+made available through the `Serving` event. Dialing a new connection will
+return a new connection ID and attach that connection to the event loop in
+the same manner as incoming connections. This operation is completely
+non-blocking including any DNS resolution.
+
+All new outbound connection attempts will immediately fire an `Opened`
+event and end with a `Closed` event. A failed connection will send the
+connection error through the `Closed` event.
+
+```go
+var srv evio.Server
+var mu sync.Mutex
+var execs = make(map[int]int)
+
+events.Serving = func(srvin evio.Server) (action evio.Action) {
+	srv = srvin // hang on to the server control, which has the Dial function
+	return
+}
+events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
+    if string(in) == "dial\r\n" {
+        id := srv.Dial("tcp://google.com:80")
+        // We now established an outbound connection to google.
+        // Treat it like you would incoming connection.
+	} else {
+		out = in
+	}
+	return
+}
+```
+
+
 
 ### Data translations
 

@@ -55,10 +55,10 @@ func testServe(network, addr string, unix bool, nclients int) {
 	var disconnected int
 
 	var events Events
-	events.Serving = func(ctx Context) (action Action) {
+	events.Serving = func(srv Server) (action Action) {
 		return
 	}
-	events.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
+	events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
 		connected++
 		out = []byte("sweetness\r\n")
 		opts.TCPKeepAlive = time.Minute * 5
@@ -163,9 +163,9 @@ func TestWake(t *testing.T) {
 }
 func testWake(network, addr string, stdlib bool) {
 	var events Events
-	var ctx Context
-	events.Serving = func(ctxin Context) (action Action) {
-		ctx = ctxin
+	var srv Server
+	events.Serving = func(srvin Server) (action Action) {
+		srv = srvin
 		go func() {
 			conn, err := net.Dial(network, addr)
 			must(err)
@@ -189,7 +189,7 @@ func testWake(network, addr string, stdlib bool) {
 	var cin []byte
 	var cclosed bool
 	var cond = sync.NewCond(&sync.Mutex{})
-	events.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
+	events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
 		cid = id
 		return
 	}
@@ -209,7 +209,7 @@ func testWake(network, addr string, stdlib bool) {
 				cin = nil
 			}
 			if len(cout) > 0 {
-				ctx.Wake(cid)
+				srv.Wake(cid)
 			}
 			cond.Wait()
 		}
@@ -317,7 +317,7 @@ func testShutdown(network, addr string, stdlib bool) {
 	var count int
 	var clients int64
 	var N = 10
-	events.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
+	events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
 		atomic.AddInt64(&clients, 1)
 		return
 	}
@@ -419,7 +419,7 @@ func testDetach(network, addr string, stdlib bool) {
 		}()
 		return
 	}
-	events.Serving = func(ctx Context) (action Action) {
+	events.Serving = func(srv Server) (action Action) {
 		go func() {
 			// client connection
 			conn, err := net.Dial(network, addr)
@@ -468,7 +468,7 @@ func testDetach(network, addr string, stdlib bool) {
 
 func TestBadAddresses(t *testing.T) {
 	var events Events
-	events.Serving = func(ctx Context) (action Action) {
+	events.Serving = func(srv Server) (action Action) {
 		return Shutdown
 	}
 	if err := Serve(events, "tulip://howdy"); err == nil {
@@ -528,21 +528,21 @@ func TestPrePostwrite(t *testing.T) {
 
 func testPrePostwrite(network, addr string, stdlib bool) {
 	var events Events
-	var ctx Context
+	var srv Server
 	var packets int
 	var tout []byte
-	events.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
+	events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
 		packets++
 		out = []byte(fmt.Sprintf("hello %d\r\n", packets))
 		tout = append(tout, out...)
-		ctx.Wake(id)
+		srv.Wake(id)
 		return
 	}
 	events.Data = func(id int, in []byte) (out []byte, action Action) {
 		packets++
 		out = []byte(fmt.Sprintf("hello %d\r\n", packets))
 		tout = append(tout, out...)
-		ctx.Wake(id)
+		srv.Wake(id)
 		return
 	}
 	events.Prewrite = func(id int, amount int) (action Action) {
@@ -562,8 +562,8 @@ func testPrePostwrite(network, addr string, stdlib bool) {
 		action = Shutdown
 		return
 	}
-	events.Serving = func(ctxin Context) (action Action) {
-		ctx = ctxin
+	events.Serving = func(srvin Server) (action Action) {
+		srv = srvin
 		go func() {
 			conn, err := net.Dial(network, addr)
 			must(err)
@@ -622,11 +622,11 @@ func testTranslate(network, addr string, kind string, stdlib bool) {
 		action = Shutdown
 		return
 	}
-	events.Opened = func(id int, addr Addr) (out []byte, opts Options, action Action) {
+	events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
 		out = []byte("sweetness\r\n")
 		return
 	}
-	events.Serving = func(ctx Context) (action Action) {
+	events.Serving = func(srv Server) (action Action) {
 		go func() {
 			conn, err := net.Dial(network, addr)
 			must(err)
@@ -663,7 +663,7 @@ func testTranslate(network, addr string, kind string, stdlib bool) {
 	}
 
 	tevents := Translate(events,
-		func(id int, addr Addr) bool {
+		func(id int, info Info) bool {
 			return true
 		},
 		func(id int, rw io.ReadWriter) io.ReadWriter {
@@ -683,7 +683,7 @@ func testTranslate(network, addr string, kind string, stdlib bool) {
 
 	// test with no shoulds
 	tevents = Translate(events,
-		func(id int, addr Addr) bool {
+		func(id int, info Info) bool {
 			return false
 		},
 		func(id int, rw io.ReadWriter) io.ReadWriter {

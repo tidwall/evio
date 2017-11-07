@@ -137,11 +137,11 @@ func serve(events Events, lns []*listener) error {
 	idconn := make(map[int]*unixConn)
 	timeoutqueue := internal.NewTimeoutQueue()
 	var id int
-	dial := func(addr string, timeout time.Duration) (int, bool) {
+	dial := func(addr string, timeout time.Duration) int {
 		lock()
 		if done {
 			unlock()
-			return 0, false
+			return 0
 		}
 		id++
 		c := &unixConn{id: id, opening: true}
@@ -207,7 +207,7 @@ func serve(events Events, lns []*listener) error {
 			}
 
 		}()
-		return id, true
+		return id
 	}
 
 	// wake wakes up a connection

@@ -58,10 +58,10 @@ type Server struct {
 	// server and returns a new connection id. The new connection is added
 	// to the event loop and is managed exactly the same way as all the
 	// other connections. This operation only fails if the server/loop has
-	// been shut down. When `ok` is true there will always be exactly one
-	// Opened and one Closed event following this call. Look for socket
-	// errors from the Closed event.
-	Dial func(addr string, timeout time.Duration) (id int, ok bool)
+	// been shut down. An `id` that is not zero means the operation succeeded
+	// and then there always be exactly one Opened and one Closed event
+	// following this call. Look for socket errors from the Closed event.
+	Dial func(addr string, timeout time.Duration) (id int)
 }
 
 // Events represents the server events for the Serve call.
@@ -112,7 +112,7 @@ type Events struct {
 // Addresses should use a scheme prefix and be formatted
 // like `tcp://192.168.0.10:9851` or `unix://socket`.
 // Valid network schemes:
-//	tcp   - bind to both IPv4 and IPv6
+//  tcp   - bind to both IPv4 and IPv6
 //  tcp4  - IPv4
 //  tcp6  - IPv6
 //  unix  - Unix Domain Socket

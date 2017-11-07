@@ -73,7 +73,6 @@ func main() {
 		c := conns[id]
 		if c.wget {
 			print(string(in))
-			//action = evio.Close
 			return
 		}
 		data := c.is.Begin(in)
@@ -100,13 +99,11 @@ func main() {
 					if len(args) != 3 {
 						out = redcon.AppendError(out, "ERR wrong number of arguments for '"+string(args[0])+"' command")
 					} else {
-						start := time.Now()
 						n, _ := strconv.ParseInt(string(args[2]), 10, 63)
-						cid, ok := srv.Dial("unix://"+string(args[1]), time.Duration(n)*time.Second)
-						if !ok {
+						cid := srv.Dial("tcp://"+string(args[1]), time.Duration(n)*time.Second)
+						if cid == 0 {
 							out = redcon.AppendError(out, "failed to dial")
 						} else {
-							println(cid, time.Since(start).String())
 							wgetids[cid] = time.Now()
 							out = redcon.AppendOK(out)
 						}
@@ -172,7 +169,7 @@ func main() {
 		c.is.End(data)
 		return
 	}
-	addrs := []string{fmt.Sprintf("tcp://:%d", port)}
+	addrs := []string{fmt.Sprintf("tcp-net://:%d", port)}
 	if unixsocket != "" {
 		addrs = append(addrs, fmt.Sprintf("unix://%s", unixsocket))
 	}
