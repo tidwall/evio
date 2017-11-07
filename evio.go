@@ -57,7 +57,7 @@ type Events struct {
 	// Use the out return value to write data to the connection.
 	// The opts return value is used to set connection options.
 	Opened func(id int, addr Addr) (out []byte, opts Options, action Action)
-	// Opened fires when a connection has closed.
+	// Closed fires when a connection has closed.
 	// The err parameter is the last known connection error, usually nil.
 	Closed func(id int, err error) (action Action)
 	// Detached fires when a connection has been previously detached.
