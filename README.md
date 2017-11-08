@@ -155,15 +155,9 @@ events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 
 ### Dial out
 
-An outbound connection can created by using the `Dial` function that is 
-made available through the `Serving` event. Dialing a new connection will
-return a new connection ID and attach that connection to the event loop in
-the same manner as incoming connections. This operation is completely
-non-blocking including any DNS resolution.
+An outbound connection can be created by using the `Dial` function that is made available through the `Serving` event. Dialing a new connection will return a new connection ID and attach that connection to the event loop in the same manner as incoming connections. This operation is completely non-blocking including any DNS resolution.
 
-All new outbound connection attempts will immediately fire an `Opened`
-event and end with a `Closed` event. A failed connection will send the
-connection error through the `Closed` event.
+All new outbound connection attempts will immediately fire an `Opened` event and end with a `Closed` event. A failed connection will send the connection error through the `Closed` event.
 
 ```go
 var srv evio.Server
