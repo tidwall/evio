@@ -86,7 +86,6 @@ func main() {
 	}
 
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
-		println(2)
 		if in == nil {
 			return
 		}

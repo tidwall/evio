@@ -170,6 +170,9 @@ func serve(events Events, lns []*listener) error {
 				case *syscall.SockaddrInet6:
 					fd, err = syscall.Socket(syscall.AF_INET6, syscall.SOCK_STREAM, 0)
 				}
+				if err != nil {
+					return err
+				}
 				err = syscall.Connect(fd, sa)
 				if err != nil && err != syscall.EINPROGRESS {
 					syscall.Close(fd)
@@ -604,12 +607,17 @@ func resolve(addr string) (sa syscall.Sockaddr, err error) {
 	case *net.UnixAddr:
 		sa = &syscall.SockaddrUnix{Name: taddr.Name}
 	case *net.TCPAddr:
-		if len(taddr.IP) == 4 {
+		switch len(taddr.IP) {
+		case 0:
+			var sa4 syscall.SockaddrInet4
+			sa4.Port = taddr.Port
+			sa = &sa4
+		case 4:
 			var sa4 syscall.SockaddrInet4
 			copy(sa4.Addr[:], taddr.IP[:])
 			sa4.Port = taddr.Port
 			sa = &sa4
-		} else if len(taddr.IP) == 16 {
+		case 16:
 			var sa6 syscall.SockaddrInet6
 			copy(sa6.Addr[:], taddr.IP[:])
 			sa6.Port = taddr.Port
