@@ -11,22 +11,53 @@ import (
 	"time"
 )
 
-func AddWrite(p, fd int, on *bool) error {
-	if *on {
-		return nil
+func AddRead(p, fd int, readon, writeon *bool) error {
+	if readon != nil {
+		if *readon {
+			return nil
+		}
+		*readon = true
 	}
-	*on = true
+	_, err := syscall.Kevent(p,
+		[]syscall.Kevent_t{{Ident: uint64(fd),
+			Flags: syscall.EV_ADD, Filter: syscall.EVFILT_READ}},
+		nil, nil)
+	return err
+}
+func DelRead(p, fd int, readon, writeon *bool) error {
+	if readon != nil {
+		if !*readon {
+			return nil
+		}
+		*readon = false
+	}
+	_, err := syscall.Kevent(p,
+		[]syscall.Kevent_t{{Ident: uint64(fd),
+			Flags: syscall.EV_DELETE, Filter: syscall.EVFILT_READ}},
+		nil, nil)
+	return err
+}
+
+func AddWrite(p, fd int, readon, writeon *bool) error {
+	if writeon != nil {
+		if *writeon {
+			return nil
+		}
+		*writeon = true
+	}
 	_, err := syscall.Kevent(p,
 		[]syscall.Kevent_t{{Ident: uint64(fd),
 			Flags: syscall.EV_ADD, Filter: syscall.EVFILT_WRITE}},
 		nil, nil)
 	return err
 }
-func DelWrite(p, fd int, on *bool) error {
-	if !*on {
-		return nil
+func DelWrite(p, fd int, readon, writeon *bool) error {
+	if writeon != nil {
+		if !*writeon {
+			return nil
+		}
+		*writeon = false
 	}
-	*on = false
 	_, err := syscall.Kevent(p,
 		[]syscall.Kevent_t{{Ident: uint64(fd),
 			Flags: syscall.EV_DELETE, Filter: syscall.EVFILT_WRITE}},
@@ -36,13 +67,6 @@ func DelWrite(p, fd int, on *bool) error {
 
 func MakePoll() (p int, err error) {
 	return syscall.Kqueue()
-}
-func AddRead(p, fd int) error {
-	_, err := syscall.Kevent(p,
-		[]syscall.Kevent_t{{Ident: uint64(fd),
-			Flags: syscall.EV_ADD, Filter: syscall.EVFILT_READ}},
-		nil, nil)
-	return err
 }
 func MakeEvents(n int) interface{} {
 	return make([]syscall.Kevent_t, n)

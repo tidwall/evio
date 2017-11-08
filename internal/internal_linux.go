@@ -9,21 +9,74 @@ import (
 	"time"
 )
 
-func AddWrite(p, fd int, on *bool) error {
-	if *on {
-		return nil
+func AddRead(p, fd int, readon, writeon *bool) error {
+	if readon != nil {
+		if *readon {
+			return nil
+		}
+		*readon = true
 	}
-	*on = true
+	if writeon == nil || !*writeon {
+		return syscall.EpollCtl(p, syscall.EPOLL_CTL_ADD, fd,
+			&syscall.EpollEvent{Fd: int32(fd),
+				Events: syscall.EPOLLIN,
+			})
+	}
 	return syscall.EpollCtl(p, syscall.EPOLL_CTL_MOD, fd,
 		&syscall.EpollEvent{Fd: int32(fd),
 			Events: syscall.EPOLLIN | syscall.EPOLLOUT,
 		})
 }
-func DelWrite(p, fd int, on *bool) error {
-	if !*on {
-		return nil
+func DelRead(p, fd int, readon, writeon *bool) error {
+	if readon != nil {
+		if !*readon {
+			return nil
+		}
+		*readon = false
 	}
-	*on = false
+	if writeon == nil || !*writeon {
+		return syscall.EpollCtl(p, syscall.EPOLL_CTL_DEL, fd,
+			&syscall.EpollEvent{Fd: int32(fd),
+				Events: syscall.EPOLLIN,
+			})
+	}
+	return syscall.EpollCtl(p, syscall.EPOLL_CTL_MOD, fd,
+		&syscall.EpollEvent{Fd: int32(fd),
+			Events: syscall.EPOLLOUT,
+		})
+}
+
+func AddWrite(p, fd int, readon, writeon *bool) error {
+	if writeon != nil {
+		if *writeon {
+			return nil
+		}
+		*writeon = true
+	}
+	if readon == nil || !*readon {
+		return syscall.EpollCtl(p, syscall.EPOLL_CTL_ADD, fd,
+			&syscall.EpollEvent{Fd: int32(fd),
+				Events: syscall.EPOLLOUT,
+			})
+	}
+	return syscall.EpollCtl(p, syscall.EPOLL_CTL_MOD, fd,
+		&syscall.EpollEvent{Fd: int32(fd),
+			Events: syscall.EPOLLIN | syscall.EPOLLOUT,
+		})
+}
+func DelWrite(p, fd int, readon, writeon *bool) error {
+	if writeon != nil {
+		if !*writeon {
+			return nil
+		}
+		*writeon = false
+	}
+	if readon == nil || !*readon {
+		return syscall.EpollCtl(p, syscall.EPOLL_CTL_DEL, fd,
+			&syscall.EpollEvent{Fd: int32(fd),
+				Events: syscall.EPOLLOUT,
+			})
+	}
 	return syscall.EpollCtl(p, syscall.EPOLL_CTL_MOD, fd,
 		&syscall.EpollEvent{Fd: int32(fd),
 			Events: syscall.EPOLLIN,
@@ -31,12 +84,6 @@ func DelWrite(p, fd int, on *bool) error {
 }
 func MakePoll() (p int, err error) {
 	return syscall.EpollCreate1(0)
-}
-func AddRead(p, fd int) error {
-	return syscall.EpollCtl(p, syscall.EPOLL_CTL_ADD, fd,
-		&syscall.EpollEvent{Fd: int32(fd),
-			Events: syscall.EPOLLIN,
-		})
 }
 func MakeEvents(n int) interface{} {
 	return make([]syscall.EpollEvent, n)

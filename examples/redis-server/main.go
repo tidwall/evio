@@ -25,10 +25,13 @@ type conn struct {
 func main() {
 	var port int
 	var unixsocket string
-	var srv evio.Server
+	var stdlib bool
 	flag.IntVar(&port, "port", 6380, "server port")
 	flag.StringVar(&unixsocket, "unixsocket", "socket", "unix socket")
+	flag.BoolVar(&stdlib, "stdlib", false, "use stdlib")
 	flag.Parse()
+
+	var srv evio.Server
 	var conns = make(map[int]*conn)
 	var keys = make(map[string]string)
 	var events evio.Events
@@ -37,6 +40,9 @@ func main() {
 		log.Printf("redis server started on port %d", port)
 		if unixsocket != "" {
 			log.Printf("redis server started at %s", unixsocket)
+		}
+		if stdlib {
+			log.Printf("stdlib")
 		}
 		return
 	}
@@ -48,7 +54,9 @@ func main() {
 			c.wget = true
 		}
 		conns[id] = c
-		println("opened", id, c.wget)
+		if c.wget {
+			log.Printf("opened: %d, wget: %t, laddr: %v, laddr: %v", id, c.wget, info.LocalAddr, info.RemoteAddr)
+		}
 		if c.wget {
 			out = []byte("GET / HTTP/1.0\r\n\r\n")
 		}
@@ -65,7 +73,10 @@ func main() {
 		return
 	}
 	events.Closed = func(id int, err error) (action evio.Action) {
-		fmt.Printf("closed %d %v\n", id, err)
+		c := conns[id]
+		if c.wget {
+			fmt.Printf("closed %d %v\n", id, err)
+		}
 		delete(conns, id)
 		return
 	}
@@ -169,9 +180,13 @@ func main() {
 		c.is.End(data)
 		return
 	}
-	addrs := []string{fmt.Sprintf("tcp://:%d", port)}
+	var ssuf string
+	if stdlib {
+		ssuf = "-net"
+	}
+	addrs := []string{fmt.Sprintf("tcp"+ssuf+"://:%d", port)}
 	if unixsocket != "" {
-		addrs = append(addrs, fmt.Sprintf("unix://%s", unixsocket))
+		addrs = append(addrs, fmt.Sprintf("unix"+ssuf+"://%s", unixsocket))
 	}
 	err := evio.Serve(events, addrs...)
 	if err != nil {

@@ -40,12 +40,14 @@ func main() {
 	var aaaa bool
 	var noparse bool
 	var unixsocket string
+	var stdlib bool
 	flag.StringVar(&unixsocket, "unixsocket", "", "unix socket")
 	flag.IntVar(&port, "port", 8080, "server port")
 	flag.IntVar(&tlsport, "tlsport", 4443, "tls port")
 	flag.StringVar(&tlspem, "tlscert", "", "tls pem cert/key file")
 	flag.BoolVar(&aaaa, "aaaa", false, "aaaaa....")
 	flag.BoolVar(&noparse, "noparse", true, "do not parse requests")
+	flag.BoolVar(&stdlib, "stdlib", false, "use stdlib")
 	flag.Parse()
 
 	if os.Getenv("NOPARSE") == "1" {
@@ -69,18 +71,25 @@ func main() {
 		if unixsocket != "" {
 			log.Printf("http server started at %s", unixsocket)
 		}
+		if stdlib {
+			log.Printf("stdlib")
+		}
 		return
 	}
 
 	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, action evio.Action) {
 		conns[id] = &conn{info: info}
-		//log.Printf("opened: %d: %s: %s", id, addr.Local.String(), addr.Remote.String())
+		log.Printf("opened: %d: laddr: %v: raddr: %v", id, info.LocalAddr, info.RemoteAddr)
+
+		// println(info.LocalAddr.(*net.TCPAddr).Zone)
+		// fmt.Printf("%#v\n", info.LocalAddr)
+		// fmt.Printf("%#v\n", (&net.TCPAddr{IP: make([]byte, 16)}))
 		return
 	}
 
 	events.Closed = func(id int, err error) (action evio.Action) {
-		// c := conns[id]
-		// log.Printf("closed: %d: %s: %s", id, c.addr.Local.String(), c.addr.Remote.String())
+		c := conns[id]
+		log.Printf("closed: %d: %s: %s", id, c.info.LocalAddr.String(), c.info.RemoteAddr.String())
 		delete(conns, id)
 		return
 	}
@@ -117,8 +126,12 @@ func main() {
 		c.is.End(data)
 		return
 	}
+	var ssuf string
+	if stdlib {
+		ssuf = "-net"
+	}
 	// We at least want the single http address.
-	addrs := []string{fmt.Sprintf("tcp://:%d", port)}
+	addrs := []string{fmt.Sprintf("tcp"+ssuf+"://:%d", port)}
 	if tlspem != "" {
 		// load the cert and key pair from the concat'd pem file.
 		cer, err := tls.LoadX509KeyPair(tlspem, tlspem)
@@ -127,7 +140,7 @@ func main() {
 		}
 		config := &tls.Config{Certificates: []tls.Certificate{cer}}
 		// Update the address list to include https.
-		addrs = append(addrs, fmt.Sprintf("tcp://:%d", tlsport))
+		addrs = append(addrs, fmt.Sprintf("tcp"+ssuf+"://:%d", tlsport))
 
 		// TLS translate the events
 		events = evio.Translate(events,
@@ -145,7 +158,7 @@ func main() {
 		)
 	}
 	if unixsocket != "" {
-		addrs = append(addrs, fmt.Sprintf("unix://%s", unixsocket))
+		addrs = append(addrs, fmt.Sprintf("unix"+ssuf+"://%s", unixsocket))
 	}
 	// Start serving!
 	log.Fatal(evio.Serve(events, addrs...))
