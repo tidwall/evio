@@ -169,7 +169,7 @@ func main() {
 		c.is.End(data)
 		return
 	}
-	addrs := []string{fmt.Sprintf("tcp-net://:%d", port)}
+	addrs := []string{fmt.Sprintf("tcp://:%d", port)}
 	if unixsocket != "" {
 		addrs = append(addrs, fmt.Sprintf("unix://%s", unixsocket))
 	}
