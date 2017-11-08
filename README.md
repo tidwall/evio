@@ -33,6 +33,7 @@ The reason I wrote this framework is so I can build certain network services tha
 - Flexible [ticker](#ticker) event
 - Fallback for non-epoll/kqueue operating systems by simulating events with the [net](https://golang.org/pkg/net/) package
 - Ability to [wake up](#wake-up) connections from long running background operations
+- [Dial](#dial-out) an outbound connection and process/proxy on the event loop
 
 ## Getting Started
 
@@ -152,7 +153,7 @@ events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 }
 ```
 
-### Dialing out
+### Dial out
 
 An outbound connection can created by using the `Dial` function that is 
 made available through the `Serving` event. Dialing a new connection will
