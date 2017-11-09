@@ -19,15 +19,15 @@ func main() {
 
 	var events evio.Events
 	events.Serving = func(srv evio.Server) (action evio.Action) {
-		log.Printf("echo server started on port %d", port)
+		log.Printf("echo server started on port %d\n", port)
 		return
 	}
 	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, action evio.Action) {
-		//log.Printf("opened: %d: %s", id, addr.Remote.String())
+		log.Printf("opened: %d: %v\n", id, info.RemoteAddr)
 		return
 	}
 	events.Closed = func(id int, err error) (action evio.Action) {
-		//log.Printf("closed: %d", id)
+		log.Printf("closed: %d\n", id)
 		return
 	}
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
