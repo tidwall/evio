@@ -33,6 +33,7 @@ The reason I wrote this framework is so I can build certain network services tha
 - Flexible [ticker](#ticker) event
 - Fallback for non-epoll/kqueue operating systems by simulating events with the [net](https://golang.org/pkg/net/) package
 - Ability to [wake up](#wake-up) connections from long running background operations
+- [Dial](#dial-out) an outbound connection and process/proxy on the event loop
 
 ## Getting Started
 
@@ -152,17 +153,11 @@ events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
 }
 ```
 
-### Dialing out
+### Dial out
 
-An outbound connection can created by using the `Dial` function that is 
-made available through the `Serving` event. Dialing a new connection will
-return a new connection ID and attach that connection to the event loop in
-the same manner as incoming connections. This operation is completely
-non-blocking including any DNS resolution.
+An outbound connection can be created by using the `Dial` function that is made available through the `Serving` event. Dialing a new connection will return a new connection ID and attach that connection to the event loop in the same manner as incoming connections. This operation is completely non-blocking including any DNS resolution.
 
-All new outbound connection attempts will immediately fire an `Opened`
-event and end with a `Closed` event. A failed connection will send the
-connection error through the `Closed` event.
+All new outbound connection attempts will immediately fire an `Opened` event and end with a `Closed` event. A failed connection will send the connection error through the `Closed` event.
 
 ```go
 var srv evio.Server
@@ -170,22 +165,20 @@ var mu sync.Mutex
 var execs = make(map[int]int)
 
 events.Serving = func(srvin evio.Server) (action evio.Action) {
-	srv = srvin // hang on to the server control, which has the Dial function
-	return
+    srv = srvin // hang on to the server control, which has the Dial function
+    return
 }
 events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
     if string(in) == "dial\r\n" {
         id := srv.Dial("tcp://google.com:80")
         // We now established an outbound connection to google.
         // Treat it like you would incoming connection.
-	} else {
-		out = in
-	}
-	return
+    } else {
+        out = in
+    }
+    return
 }
 ```
-
-
 
 ### Data translations
 
