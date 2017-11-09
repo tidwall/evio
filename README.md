@@ -165,22 +165,20 @@ var mu sync.Mutex
 var execs = make(map[int]int)
 
 events.Serving = func(srvin evio.Server) (action evio.Action) {
-	srv = srvin // hang on to the server control, which has the Dial function
-	return
+    srv = srvin // hang on to the server control, which has the Dial function
+    return
 }
 events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
     if string(in) == "dial\r\n" {
         id := srv.Dial("tcp://google.com:80")
         // We now established an outbound connection to google.
         // Treat it like you would incoming connection.
-	} else {
-		out = in
-	}
-	return
+    } else {
+        out = in
+    }
+    return
 }
 ```
-
-
 
 ### Data translations
 
