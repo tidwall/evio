@@ -457,11 +457,6 @@ func serve(events Events, lns []*listener) error {
 				}
 				in = append([]byte{}, packet[:n]...)
 			}
-			// if c.laddr == nil {
-			// 	// we need the local address and to open the socket
-			// 	lsa, _ = syscall.Getsockname(c.fd)
-			// 	c.laddr = sock
-			// }
 			if events.Data != nil {
 				unlock()
 				out, c.action = events.Data(c.id, in)
