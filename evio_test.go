@@ -62,6 +62,12 @@ func testServe(network, addr string, unix bool, nclients int) {
 		connected++
 		out = []byte("sweetness\r\n")
 		opts.TCPKeepAlive = time.Minute * 5
+		if info.LocalAddr == nil {
+			panic("nil local addr")
+		}
+		if info.RemoteAddr == nil {
+			panic("nil local addr")
+		}
 		return
 	}
 	events.Closed = func(id int, err error) (action Action) {
