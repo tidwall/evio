@@ -22,5 +22,5 @@ func (ln *listener) system() error {
 }
 
 func serve(events Events, lns []*listener) error {
-	return servestdlib(events, lns)
+	return servenet(events, lns)
 }
