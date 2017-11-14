@@ -28,13 +28,12 @@ The reason I wrote this framework is so I can build certain network services tha
 - [Fast](#performance) single-threaded event loop
 - Simple API
 - Low memory usage
-- Supports tcp4, tcp6, and unix sockets
+- Supports tcp, [udp](#udp), and unix sockets
 - Allows [multiple network binding](#multiple-addresses) on the same event loop
 - Flexible [ticker](#ticker) event
 - Fallback for non-epoll/kqueue operating systems by simulating events with the [net](https://golang.org/pkg/net/) package
 - Ability to [wake up](#wake-up) connections from long running background operations
 - [Dial](#dial-out) an outbound connection and process/proxy on the event loop
-- [UDP](#udp) support
 
 ## Getting Started
 
