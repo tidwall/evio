@@ -12,6 +12,9 @@ func (ln *listener) close() {
 	if ln.ln != nil {
 		ln.ln.Close()
 	}
+	if ln.pconn != nil {
+		ln.pconn.Close()
+	}
 	if ln.network == "unix" {
 		os.RemoveAll(ln.addr)
 	}
