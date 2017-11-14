@@ -18,7 +18,7 @@ type Action int
 const (
 	// None indicates that no action should occur following an event.
 	None Action = iota
-	// Detach detaches the client.
+	// Detach detaches the client. Not available for UDP connections.
 	Detach
 	// Close closes the client.
 	Close
@@ -52,7 +52,8 @@ type Server struct {
 	// with the addr strings passed to the Serve function.
 	Addrs []net.Addr
 	// Wake is a goroutine-safe function that triggers a Data event
-	// (with a nil `in` parameter) for the specified id.
+	// (with a nil `in` parameter) for the specified id.  Not available for
+	// UDP connections.
 	Wake func(id int) (ok bool)
 	// Dial is a goroutine-safe function makes a connection to an external
 	// server and returns a new connection id. The new connection is added
@@ -61,6 +62,7 @@ type Server struct {
 	// been shut down. An `id` that is not zero means the operation succeeded
 	// and then there always be exactly one Opened and one Closed event
 	// following this call. Look for socket errors from the Closed event.
+	// Not available for UDP connections.
 	Dial func(addr string, timeout time.Duration) (id int)
 }
 
@@ -115,6 +117,9 @@ type Events struct {
 //  tcp   - bind to both IPv4 and IPv6
 //  tcp4  - IPv4
 //  tcp6  - IPv6
+//  udp   - bind to both IPv4 and IPv6
+//  udp4  - IPv4
+//  udp6  - IPv6
 //  unix  - Unix Domain Socket
 //
 // The "tcp" network scheme is assumed when one is not specified.
@@ -137,11 +142,19 @@ func Serve(events Events, addr ...string) error {
 			os.RemoveAll(ln.addr)
 		}
 		var err error
-		ln.ln, err = net.Listen(ln.network, ln.addr)
+		if ln.network == "udp" {
+			ln.pconn, err = net.ListenPacket(ln.network, ln.addr)
+		} else {
+			ln.ln, err = net.Listen(ln.network, ln.addr)
+		}
 		if err != nil {
 			return err
 		}
-		ln.naddr = ln.ln.Addr()
+		if ln.pconn != nil {
+			ln.lnaddr = ln.pconn.LocalAddr()
+		} else {
+			ln.lnaddr = ln.ln.Addr()
+		}
 		if !stdlib {
 			if err := ln.system(); err != nil {
 				return err
@@ -183,11 +196,12 @@ func (is *InputStream) End(data []byte) {
 
 type listener struct {
 	ln      net.Listener
+	lnaddr  net.Addr
+	pconn   net.PacketConn
 	f       *os.File
 	fd      int
 	network string
 	addr    string
-	naddr   net.Addr
 }
 
 func parseAddr(addr string) (network, address string, stdlib bool) {

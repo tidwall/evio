@@ -17,6 +17,7 @@ type netConn struct {
 	id       int
 	wake     int64
 	conn     net.Conn
+	udpaddr  net.Addr
 	detached bool
 	outbuf   []byte
 	err      error
@@ -63,10 +64,16 @@ func (c *netConn) Close() error {
 
 // servenet uses the stdlib net package instead of syscalls.
 func servenet(events Events, lns []*listener) error {
+	type udpaddr struct {
+		IP   [16]byte
+		Port int
+		Zone string
+	}
 	var idc int64
 	var mu sync.Mutex
 	var cmu sync.Mutex
 	var idconn = make(map[int]*netConn)
+	var udpconn = make(map[udpaddr]*netConn)
 	var done int64
 	var shutdown func(err error)
 
@@ -315,18 +322,27 @@ func servenet(events Events, lns []*listener) error {
 		atomic.StoreInt64(&done, 1)
 		ferr = err
 		for _, ln := range lns {
-			ln.ln.Close()
+			if ln.pconn != nil {
+				ln.pconn.Close()
+			} else {
+				ln.ln.Close()
+			}
 		}
 		type connid struct {
 			conn net.Conn
 			id   int
 		}
 		var connids []connid
+		var udpids []int
 		cmu.Lock()
 		for id, conn := range idconn {
 			connids = append(connids, connid{conn.conn, id})
 		}
+		for _, c := range udpconn {
+			udpids = append(udpids, c.id)
+		}
 		idconn = make(map[int]*netConn)
+		udpconn = make(map[udpaddr]*netConn)
 		cmu.Unlock()
 		mu.Unlock()
 		sort.Slice(connids, func(i, j int) bool {
@@ -340,10 +356,17 @@ func servenet(events Events, lns []*listener) error {
 				mu.Unlock()
 			}
 		}
+		for _, id := range udpids {
+			if events.Closed != nil {
+				mu.Lock()
+				events.Closed(id, nil)
+				mu.Unlock()
+			}
+		}
 	}
 	ctx.Addrs = make([]net.Addr, len(lns))
 	for i, ln := range lns {
-		ctx.Addrs[i] = ln.naddr
+		ctx.Addrs[i] = ln.lnaddr
 	}
 	if events.Serving != nil {
 		if events.Serving(ctx) == Shutdown {
@@ -353,22 +376,123 @@ func servenet(events Events, lns []*listener) error {
 	var lwg sync.WaitGroup
 	lwg.Add(len(lns))
 	for i, ln := range lns {
-		go func(lnidx int, ln net.Listener) {
-			defer lwg.Done()
-			for {
-				conn, err := ln.Accept()
-				if err != nil {
-					if err == io.EOF {
-						shutdown(nil)
-					} else {
-						shutdown(err)
+		if ln.pconn != nil {
+			go func(lnidx int, pconn net.PacketConn) {
+				defer lwg.Done()
+				var packet [0xFFFF]byte
+				for {
+					n, addr, err := pconn.ReadFrom(packet[:])
+					if err != nil {
+						if err == io.EOF {
+							shutdown(nil)
+						} else {
+							shutdown(err)
+						}
+						return
 					}
-					return
+					var uaddr udpaddr
+					switch addr := addr.(type) {
+					case *net.TCPAddr:
+						copy(uaddr.IP[16-len(addr.IP):], addr.IP)
+						uaddr.Zone = addr.Zone
+						uaddr.Port = addr.Port
+					}
+					var out []byte
+					var action Action
+					var c *netConn
+					mu.Lock()
+					c = udpconn[uaddr]
+					mu.Unlock()
+					if c == nil {
+						id := int(atomic.AddInt64(&idc, 1))
+						c = &netConn{id: id, udpaddr: addr}
+						mu.Lock()
+						udpconn[uaddr] = c
+						mu.Unlock()
+						if events.Opened != nil {
+							mu.Lock()
+							out, _, action = events.Opened(c.id, Info{AddrIndex: lnidx, LocalAddr: pconn.LocalAddr(), RemoteAddr: addr})
+							mu.Unlock()
+							if len(out) > 0 {
+								if events.Prewrite != nil {
+									mu.Lock()
+									action2 := events.Prewrite(c.id, len(out))
+									mu.Unlock()
+									if action2 == Shutdown {
+										action = action2
+									}
+								}
+								pconn.WriteTo(out, addr)
+								if events.Prewrite != nil {
+									mu.Lock()
+									action2 := events.Postwrite(c.id, len(out), 0)
+									mu.Unlock()
+									if action2 == Shutdown {
+										action = action2
+									}
+								}
+							}
+						}
+					}
+					if action == None {
+						if events.Data != nil {
+							mu.Lock()
+							out, action = events.Data(c.id, append([]byte{}, packet[:n]...))
+							mu.Unlock()
+							if len(out) > 0 {
+								if events.Prewrite != nil {
+									mu.Lock()
+									action2 := events.Prewrite(c.id, len(out))
+									mu.Unlock()
+									if action2 == Shutdown {
+										action = action2
+									}
+								}
+								pconn.WriteTo(out, addr)
+								if events.Prewrite != nil {
+									mu.Lock()
+									action2 := events.Postwrite(c.id, len(out), 0)
+									mu.Unlock()
+									if action2 == Shutdown {
+										action = action2
+									}
+								}
+							}
+						}
+					}
+					switch action {
+					case Close, Detach:
+						mu.Lock()
+						delete(udpconn, uaddr)
+						if events.Closed != nil {
+							action = events.Closed(c.id, nil)
+						}
+						mu.Unlock()
+					}
+					if action == Shutdown {
+						shutdown(nil)
+						return
+					}
 				}
-				id := int(atomic.AddInt64(&idc, 1))
-				go connloop(id, conn, lnidx, ln)
-			}
-		}(i, ln.ln)
+			}(i, ln.pconn)
+		} else {
+			go func(lnidx int, ln net.Listener) {
+				defer lwg.Done()
+				for {
+					conn, err := ln.Accept()
+					if err != nil {
+						if err == io.EOF {
+							shutdown(nil)
+						} else {
+							shutdown(err)
+						}
+						return
+					}
+					id := int(atomic.AddInt64(&idc, 1))
+					go connloop(id, conn, lnidx, ln)
+				}
+			}(i, ln.ln)
+		}
 	}
 	go func() {
 		for {

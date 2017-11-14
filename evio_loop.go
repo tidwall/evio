@@ -27,6 +27,9 @@ func (ln *listener) close() {
 	if ln.ln != nil {
 		ln.ln.Close()
 	}
+	if ln.pconn != nil {
+		ln.pconn.Close()
+	}
 	if ln.network == "unix" {
 		os.RemoveAll(ln.addr)
 	}
@@ -39,6 +42,13 @@ func (ln *listener) system() error {
 	switch netln := ln.ln.(type) {
 	default:
 		panic("invalid listener type")
+	case nil:
+		switch pconn := ln.pconn.(type) {
+		default:
+			panic("invalid packetconn type")
+		case *net.UDPConn:
+			ln.f, err = pconn.File()
+		}
 	case *net.TCPListener:
 		ln.f, err = netln.File()
 	case *net.UnixListener:
@@ -138,6 +148,7 @@ func serve(events Events, lns []*listener) error {
 	unlock := func() { mu.Unlock() }
 	fdconn := make(map[int]*unixConn)
 	idconn := make(map[int]*unixConn)
+	udpconn := make(map[syscall.SockaddrInet6]*unixConn)
 	timeoutqueue := internal.NewTimeoutQueue()
 	var id int
 	dial := func(addr string, timeout time.Duration) int {
@@ -241,7 +252,7 @@ func serve(events Events, lns []*listener) error {
 	ctx := Server{Wake: wake, Dial: dial}
 	ctx.Addrs = make([]net.Addr, len(lns))
 	for i, ln := range lns {
-		ctx.Addrs[i] = ln.naddr
+		ctx.Addrs[i] = ln.lnaddr
 	}
 	if events.Serving != nil {
 		switch events.Serving(ctx) {
@@ -291,12 +302,21 @@ func serve(events Events, lns []*listener) error {
 				lock()
 			}
 		}
+		for _, c := range udpconn {
+			if events.Closed != nil {
+				unlock()
+				events.Closed(c.id, nil)
+				lock()
+			}
+		}
 		syscall.Close(p)
 		fdconn = nil
 		idconn = nil
+		udpconn = nil
 		unlock()
 	}()
 	var rsa syscall.Sockaddr
+	var sa6 syscall.SockaddrInet6
 
 	var packet [0xFFFF]byte
 	var evs = internal.MakeEvents(64)
@@ -372,6 +392,7 @@ func serve(events Events, lns []*listener) error {
 		lock()
 		for i := 0; i < pn; i++ {
 			var in []byte
+			var sa syscall.Sockaddr
 			var c *unixConn
 			var nfd int
 			var n int
@@ -381,6 +402,9 @@ func serve(events Events, lns []*listener) error {
 			var fd = internal.GetFD(evs, i)
 			for lnidx, ln = range lns {
 				if fd == ln.fd {
+					if ln.pconn != nil {
+						goto udpread
+					}
 					goto accept
 				}
 			}
@@ -397,6 +421,7 @@ func serve(events Events, lns []*listener) error {
 		accept:
 			nfd, rsa, err = syscall.Accept(fd)
 			if err != nil {
+				println(err.Error())
 				goto next
 			}
 			if err = syscall.SetNonblock(nfd, true); err != nil {
@@ -440,6 +465,102 @@ func serve(events Events, lns []*listener) error {
 				goto next
 			}
 			goto write
+		udpread:
+			n, sa, err = syscall.Recvfrom(fd, packet[:], 0)
+			if err != nil || n == 0 {
+				goto next
+			}
+			switch sa := sa.(type) {
+			case *syscall.SockaddrInet4:
+				sa6.ZoneId = 0
+				sa6.Port = sa.Port
+				for i := 0; i < 12; i++ {
+					sa6.Addr[i] = 0
+				}
+				sa6.Addr[12] = sa.Addr[0]
+				sa6.Addr[13] = sa.Addr[1]
+				sa6.Addr[14] = sa.Addr[2]
+				sa6.Addr[15] = sa.Addr[3]
+			case *syscall.SockaddrInet6:
+				sa6 = *sa
+			}
+			c = udpconn[sa6]
+			if c == nil {
+				id++
+				c = &unixConn{id: id,
+					lnidx: lnidx,
+					laddr: ln.lnaddr,
+					raddr: sockaddrToAddr(sa),
+				}
+				udpconn[sa6] = c
+				if events.Opened != nil {
+					unlock()
+					out, _, c.action = events.Opened(c.id, Info{AddrIndex: c.lnidx, LocalAddr: c.laddr, RemoteAddr: c.raddr})
+					lock()
+					if len(out) > 0 {
+						if events.Prewrite != nil {
+							unlock()
+							action := events.Prewrite(id, len(out))
+							lock()
+							if action == Shutdown {
+								c.action = action
+							}
+						}
+						syscall.Sendto(fd, out, 0, sa)
+						if events.Postwrite != nil {
+							unlock()
+							action := events.Postwrite(id, len(out), 0)
+							lock()
+							if action == Shutdown {
+								c.action = action
+							}
+						}
+					}
+				}
+			}
+			if c.action == None {
+				if events.Data != nil {
+					unlock()
+					out, c.action = events.Data(c.id, append([]byte{}, packet[:n]...))
+					lock()
+					if len(out) > 0 {
+						if events.Prewrite != nil {
+							unlock()
+							action := events.Prewrite(id, len(out))
+							lock()
+							if action == Shutdown {
+								c.action = action
+							}
+						}
+						syscall.Sendto(fd, out, 0, sa)
+						if events.Postwrite != nil {
+							unlock()
+							action := events.Postwrite(id, len(out), 0)
+							lock()
+							if action == Shutdown {
+								c.action = action
+							}
+						}
+					}
+				}
+			}
+			switch c.action {
+			case Close, Detach:
+				delete(udpconn, sa6)
+				if events.Closed != nil {
+					unlock()
+					action := events.Closed(id, nil)
+					lock()
+					if action == Shutdown {
+						c.action = action
+					}
+				}
+			}
+			if c.action == Shutdown {
+				err = nil
+				goto fail
+			}
+			goto next
 		read:
 			if c.action != None {
 				goto write
@@ -641,12 +762,12 @@ func sockaddrToAddr(sa syscall.Sockaddr) net.Addr {
 }
 
 func filladdrs(c *unixConn) {
-	if c.laddr == nil {
+	if c.laddr == nil && c.fd != 0 {
 		sa, _ := syscall.Getsockname(c.fd)
 		c.laddr = sockaddrToAddr(sa)
 	}
-	if c.raddr == nil {
-		sa, _ := syscall.Getsockname(c.fd)
+	if c.raddr == nil && c.fd != 0 {
+		sa, _ := syscall.Getpeername(c.fd)
 		c.raddr = sockaddrToAddr(sa)
 	}
 }

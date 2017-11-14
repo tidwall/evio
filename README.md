@@ -34,6 +34,7 @@ The reason I wrote this framework is so I can build certain network services tha
 - Fallback for non-epoll/kqueue operating systems by simulating events with the [net](https://golang.org/pkg/net/) package
 - Ability to [wake up](#wake-up) connections from long running background operations
 - [Dial](#dial-out) an outbound connection and process/proxy on the event loop
+- [UDP](#udp) support
 
 ## Getting Started
 
@@ -225,6 +226,15 @@ Hello World!
 $ curl -k https://localhost:4443
 Hello World!
 ```
+
+## UDP
+
+The `Serve` function can bind to UDP addresses. 
+
+- The `Opened` event will fire when a UDP packet is received from a new remote address.
+- The `Closed` event will fire when the server is shutdown or the `Close` action is explicitly returned from an event.
+- The `Wake` and `Dial` operations are not available to UDP connections.
+- All incoming and outgoing packets are not buffered and sent as single packet.
 
 ## More examples
 
