@@ -238,7 +238,12 @@ func serve(events Events, lns []*listener) error {
 		}
 		c := idconn[id]
 		if c == nil || c.fd == 0 {
-			ok = false
+			if c.opening {
+				c.wake = true
+				ok = true
+			} else {
+				ok = false
+			}
 		} else if !c.wake {
 			c.wake = true
 			err = internal.AddWrite(p, c.fd, &c.readon, &c.writeon)
@@ -421,7 +426,6 @@ func serve(events Events, lns []*listener) error {
 		accept:
 			nfd, rsa, err = syscall.Accept(fd)
 			if err != nil {
-				println(err.Error())
 				goto next
 			}
 			if err = syscall.SetNonblock(nfd, true); err != nil {
