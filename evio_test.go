@@ -727,3 +727,40 @@ func testTranslate(network, addr string, kind string, stdlib bool) {
 // 	kind = "tcp6"
 // 	must(Serve(events, "tcp6://:9991"))
 // }
+
+func TestReuseBuffer(t *testing.T) {
+	reuses := []bool{true, false}
+	for _, reuse := range reuses {
+		var events Events
+		events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
+			opts.ReusePacketBuffer = reuse
+			return
+		}
+		var prev []byte
+		events.Data = func(id int, in []byte) (out []byte, action Action) {
+			if prev == nil {
+				prev = in
+			} else {
+				reused := string(in) == string(prev)
+				if reused != reuse {
+					t.Fatalf("expected %v, got %v", reuse, reused)
+				}
+				action = Shutdown
+			}
+			return
+		}
+		events.Serving = func(_ Server) (action Action) {
+			go func() {
+				c, err := net.Dial("tcp", ":9991")
+				must(err)
+				defer c.Close()
+				c.Write([]byte("packet1"))
+				time.Sleep(time.Second / 5)
+				c.Write([]byte("packet2"))
+			}()
+			return
+		}
+		must(Serve(events, "tcp://:9991"))
+	}
+
+}

@@ -524,8 +524,13 @@ func serve(events Events, lns []*listener) error {
 			}
 			if c.action == None {
 				if events.Data != nil {
+					if c.opts.ReusePacketBuffer {
+						in = packet[:n]
+					} else {
+						in = append([]byte{}, packet[:n]...)
+					}
 					unlock()
-					out, c.action = events.Data(c.id, append([]byte{}, packet[:n]...))
+					out, c.action = events.Data(c.id, in)
 					lock()
 					if len(out) > 0 {
 						if events.Prewrite != nil {
@@ -580,7 +585,11 @@ func serve(events Events, lns []*listener) error {
 					c.err = err
 					goto close
 				}
-				in = append([]byte{}, packet[:n]...)
+				if c.opts.ReusePacketBuffer {
+					in = packet[:n]
+				} else {
+					in = append([]byte{}, packet[:n]...)
+				}
 			}
 			if events.Data != nil {
 				unlock()
