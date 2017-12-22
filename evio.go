@@ -30,11 +30,12 @@ const (
 type Options struct {
 	// TCPKeepAlive (SO_KEEPALIVE) socket option.
 	TCPKeepAlive time.Duration
-	// ReusePacketBuffer will force the connection to share and reuse the
-	// input packet buffer with all connections that also use this option.
-	// Default value is false, which means that all input data passed to the
-	// Data event will be a uniquely copied []byte slice.
-	ReusePacketBuffer bool
+	// ReuseInputBuffer will forces the connection to share and reuse the
+	// same input packet buffer with all other connections that also use
+	// this option.
+	// Default value is false, which means that all input data which is
+	// passed to the Data event will be a uniquely copied []byte slice.
+	ReuseInputBuffer bool
 }
 
 // Info represents a information about the connection

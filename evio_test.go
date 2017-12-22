@@ -728,12 +728,12 @@ func testTranslate(network, addr string, kind string, stdlib bool) {
 // 	must(Serve(events, "tcp6://:9991"))
 // }
 
-func TestReuseBuffer(t *testing.T) {
+func TestReuseInputBuffer(t *testing.T) {
 	reuses := []bool{true, false}
 	for _, reuse := range reuses {
 		var events Events
 		events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
-			opts.ReusePacketBuffer = reuse
+			opts.ReuseInputBuffer = reuse
 			return
 		}
 		var prev []byte

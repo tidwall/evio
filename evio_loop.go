@@ -524,7 +524,7 @@ func serve(events Events, lns []*listener) error {
 			}
 			if c.action == None {
 				if events.Data != nil {
-					if c.opts.ReusePacketBuffer {
+					if c.opts.ReuseInputBuffer {
 						in = packet[:n]
 					} else {
 						in = append([]byte{}, packet[:n]...)
@@ -585,7 +585,7 @@ func serve(events Events, lns []*listener) error {
 					c.err = err
 					goto close
 				}
-				if c.opts.ReusePacketBuffer {
+				if c.opts.ReuseInputBuffer {
 					in = packet[:n]
 				} else {
 					in = append([]byte{}, packet[:n]...)
