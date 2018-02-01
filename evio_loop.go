@@ -238,7 +238,7 @@ func serve(events Events, lns []*listener) error {
 		}
 		c := idconn[id]
 		if c == nil || c.fd == 0 {
-			if c.opening {
+			if c!=nil && c.opening {
 				c.wake = true
 				ok = true
 			} else {
