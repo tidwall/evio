@@ -121,7 +121,7 @@ func startClient(network, addr string) {
 	if string(msg) != "sweetness\r\n" {
 		panic("bad header")
 	}
-	duration := time.Duration((rand.Float64()*2 + 1) * float64(time.Second))
+	duration := time.Duration((rand.Float64()*2+1)*float64(time.Second)) / 4
 	start := time.Now()
 	for time.Since(start) < duration {
 		sz := rand.Int() % (1024 * 1024)
@@ -351,7 +351,7 @@ func testShutdown(network, addr string, stdlib bool) {
 			}
 		}
 		count++
-		delay = time.Second / 5
+		delay = time.Second / 20
 		return
 	}
 	if stdlib {
@@ -393,7 +393,7 @@ func testDetach(network, addr string, stdlib bool) {
 	// we will write a bunch of data with the text "--detached--" in the
 	// middle followed by a bunch of data.
 	rand.Seed(time.Now().UnixNano())
-	rdat := make([]byte, 10*1024*1024)
+	rdat := make([]byte, 10*1024)
 	if _, err := rand.Read(rdat); err != nil {
 		panic("random error: " + err.Error())
 	}
