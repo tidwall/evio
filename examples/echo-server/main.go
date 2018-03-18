@@ -41,7 +41,9 @@ func main() {
 		return
 	}
 	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
-		log.Printf("%s", strings.TrimSpace(string(in)))
+		if trace {
+			log.Printf("%s", strings.TrimSpace(string(in)))
+		}
 		out = in
 		return
 	}
