@@ -20,7 +20,7 @@ func (ln *listener) close() {
 	}
 }
 
-func (ln *listener) system() error {
+func (ln *listener) system(opts map[string]string) error {
 	return nil
 }
 

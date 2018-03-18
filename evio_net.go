@@ -275,7 +275,7 @@ func servenet(events Events, lns []*listener) error {
 			}
 			id := int(atomic.AddInt64(&idc, 1))
 			go func() {
-				network, address, _ := parseAddr(addr)
+				network, address, _, _ := parseAddr(addr)
 				var conn net.Conn
 				var err error
 				if timeout > 0 {

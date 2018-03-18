@@ -37,7 +37,9 @@ func (ln *listener) close() {
 
 // system takes the net listener and detaches it from it's parent
 // event loop, grabs the file descriptor, and makes it non-blocking.
-func (ln *listener) system() error {
+// The opts param provides additional socket options. SO_REUSEPORT is
+// currently the only extra option.
+func (ln *listener) system(opts map[string]string) error {
 	var err error
 	switch netln := ln.ln.(type) {
 	default:
@@ -59,7 +61,23 @@ func (ln *listener) system() error {
 		return err
 	}
 	ln.fd = int(ln.f.Fd())
-	return syscall.SetNonblock(ln.fd, true)
+	err = syscall.SetNonblock(ln.fd, true)
+	if err != nil {
+		return err
+	}
+	// switch strings.ToLower(opts["reuseport"]) {
+	// case "true", "yes", "1":
+	// 	println(123)
+	// 	err = syscall.SetsockoptInt(ln.fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	err = syscall.SetsockoptInt(ln.fd, syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// }
+	return nil
 }
 
 // unixConn represents the connection as the event loop sees it.
@@ -708,7 +726,7 @@ func serve(events Events, lns []*listener) error {
 // resolve resolves an evio address and retuns a sockaddr for socket
 // connection to external servers.
 func resolve(addr string) (sa syscall.Sockaddr, err error) {
-	network, address, _ := parseAddr(addr)
+	network, address, _, _ := parseAddr(addr)
 	var taddr net.Addr
 	switch network {
 	default:
