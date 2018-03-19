@@ -322,7 +322,7 @@ func serve(events Events, lns []*listener) error {
 	}()
 	var rsa syscall.Sockaddr
 	var sa6 syscall.SockaddrInet6
-
+	var detached []int
 	var packet [0xFFFF]byte
 	var evs = internal.MakeEvents(64)
 	nextTicker := time.Now()
@@ -394,6 +394,7 @@ func serve(events Events, lns []*listener) error {
 				continue
 			}
 		}
+		detached = detached[:0]
 		lock()
 		for i := 0; i < pn; i++ {
 			var in []byte
@@ -416,7 +417,16 @@ func serve(events Events, lns []*listener) error {
 			ln = nil
 			c = fdconn[fd]
 			if c == nil {
-				syscall.Close(fd)
+				var found bool
+				for _, dfd := range detached {
+					if dfd == fd {
+						found = true
+						break
+					}
+				}
+				if !found {
+					syscall.Close(fd)
+				}
 				goto next
 			}
 			if c.opening {
@@ -665,6 +675,13 @@ func serve(events Events, lns []*listener) error {
 			delete(idconn, c.id)
 			if c.action == Detach {
 				if events.Detached != nil {
+					if err = internal.DelRead(p, c.fd, &c.readon, &c.writeon); err != nil {
+						goto fail
+					}
+					if err = internal.DelWrite(p, c.fd, &c.readon, &c.writeon); err != nil {
+						goto fail
+					}
+					detached = append(detached, c.fd)
 					c.detached = true
 					if len(c.outbuf)-c.outpos > 0 {
 						c.outbuf = append(c.outbuf[:0], c.outbuf[c.outpos:]...)
@@ -708,7 +725,7 @@ func serve(events Events, lns []*listener) error {
 // resolve resolves an evio address and retuns a sockaddr for socket
 // connection to external servers.
 func resolve(addr string) (sa syscall.Sockaddr, err error) {
-	network, address, _ := parseAddr(addr)
+	network, address, _, _ := parseAddr(addr)
 	var taddr net.Addr
 	switch network {
 	default:

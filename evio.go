@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/kavu/go_reuseport"
 )
 
 // Action is an action that occurs after the completion of an event.
@@ -140,7 +142,7 @@ func Serve(events Events, addr ...string) error {
 	for _, addr := range addr {
 		var ln listener
 		var stdlibt bool
-		ln.network, ln.addr, stdlibt = parseAddr(addr)
+		ln.network, ln.addr, ln.opts, stdlibt = parseAddr(addr)
 		if stdlibt {
 			stdlib = true
 		}
@@ -149,9 +151,17 @@ func Serve(events Events, addr ...string) error {
 		}
 		var err error
 		if ln.network == "udp" {
-			ln.pconn, err = net.ListenPacket(ln.network, ln.addr)
+			if ln.opts.reusePort() {
+				ln.pconn, err = reuseport.ListenPacket(ln.network, ln.addr)
+			} else {
+				ln.pconn, err = net.ListenPacket(ln.network, ln.addr)
+			}
 		} else {
-			ln.ln, err = net.Listen(ln.network, ln.addr)
+			if ln.opts.reusePort() {
+				ln.ln, err = reuseport.Listen(ln.network, ln.addr)
+			} else {
+				ln.ln, err = net.Listen(ln.network, ln.addr)
+			}
 		}
 		if err != nil {
 			return err
@@ -204,15 +214,27 @@ type listener struct {
 	ln      net.Listener
 	lnaddr  net.Addr
 	pconn   net.PacketConn
+	opts    addrOpts
 	f       *os.File
 	fd      int
 	network string
 	addr    string
 }
 
-func parseAddr(addr string) (network, address string, stdlib bool) {
+type addrOpts map[string]string
+
+func (opts addrOpts) reusePort() bool {
+	switch opts["reuseport"] {
+	case "yes", "true", "1":
+		return true
+	}
+	return false
+}
+
+func parseAddr(addr string) (network, address string, opts addrOpts, stdlib bool) {
 	network = "tcp"
 	address = addr
+	opts = make(map[string]string)
 	if strings.Contains(address, "://") {
 		network = strings.Split(address, "://")[0]
 		address = strings.Split(address, "://")[1]
@@ -220,6 +242,16 @@ func parseAddr(addr string) (network, address string, stdlib bool) {
 	if strings.HasSuffix(network, "-net") {
 		stdlib = true
 		network = network[:len(network)-4]
+	}
+	q := strings.Index(address, "?")
+	if q != -1 {
+		for _, part := range strings.Split(address[q+1:], "&") {
+			kv := strings.Split(part, "=")
+			if len(kv) == 2 {
+				opts[kv[0]] = kv[1]
+			}
+		}
+		address = address[:q]
 	}
 	return
 }

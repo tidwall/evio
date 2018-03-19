@@ -34,6 +34,7 @@ The reason I wrote this framework is so I can build certain network services tha
 - Fallback for non-epoll/kqueue operating systems by simulating events with the [net](https://golang.org/pkg/net/) package
 - Ability to [wake up](#wake-up) connections from long running background operations
 - [Dial](#dial-out) an outbound connection and process/proxy on the event loop
+- [SO_REUSEPORT](#so_reuseport) socket option
 
 ## Getting Started
 
@@ -205,7 +206,7 @@ events = evio.Translate(events, nil,
 	},
 )
 
-log.Fatal(Serve(events, "tcp://0.0.0.0:443"))
+log.Fatal(evio.Serve(events, "tcp://0.0.0.0:443"))
 ```
 
 Here we wrapped the event with a TLS translator. The `evio.NopConn` function is used to converts the `ReadWriter` a `net.Conn` so the `tls.Server()` call will work.
@@ -234,6 +235,16 @@ The `Serve` function can bind to UDP addresses.
 - The `Closed` event will fire when the server is shutdown or the `Close` action is explicitly returned from an event.
 - The `Wake` and `Dial` operations are not available to UDP connections.
 - All incoming and outgoing packets are not buffered and sent individually.
+
+## SO_REUSEPORT
+
+Servers can utilize the [SO_REUSEPORT](https://lwn.net/Articles/542629/) option which allows multiple sockets on the same host to bind to the same port.
+
+Just provide `reuseport=true` to an address:
+
+```go
+evio.Serve(events, "tcp://0.0.0.0:1234?reuseport=true"))
+```
 
 ## More examples
 
