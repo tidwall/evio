@@ -37,9 +37,7 @@ func (ln *listener) close() {
 
 // system takes the net listener and detaches it from it's parent
 // event loop, grabs the file descriptor, and makes it non-blocking.
-// The opts param provides additional socket options. SO_REUSEPORT is
-// currently the only extra option.
-func (ln *listener) system(opts map[string]string) error {
+func (ln *listener) system() error {
 	var err error
 	switch netln := ln.ln.(type) {
 	default:
@@ -61,23 +59,7 @@ func (ln *listener) system(opts map[string]string) error {
 		return err
 	}
 	ln.fd = int(ln.f.Fd())
-	err = syscall.SetNonblock(ln.fd, true)
-	if err != nil {
-		return err
-	}
-	// switch strings.ToLower(opts["reuseport"]) {
-	// case "true", "yes", "1":
-	// 	println(123)
-	// 	err = syscall.SetsockoptInt(ln.fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	err = syscall.SetsockoptInt(ln.fd, syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
-	return nil
+	return syscall.SetNonblock(ln.fd, true)
 }
 
 // unixConn represents the connection as the event loop sees it.
@@ -340,7 +322,7 @@ func serve(events Events, lns []*listener) error {
 	}()
 	var rsa syscall.Sockaddr
 	var sa6 syscall.SockaddrInet6
-
+	var detached []int
 	var packet [0xFFFF]byte
 	var evs = internal.MakeEvents(64)
 	nextTicker := time.Now()
@@ -412,6 +394,7 @@ func serve(events Events, lns []*listener) error {
 				continue
 			}
 		}
+		detached = detached[:0]
 		lock()
 		for i := 0; i < pn; i++ {
 			var in []byte
@@ -434,7 +417,16 @@ func serve(events Events, lns []*listener) error {
 			ln = nil
 			c = fdconn[fd]
 			if c == nil {
-				syscall.Close(fd)
+				var found bool
+				for _, dfd := range detached {
+					if dfd == fd {
+						found = true
+						break
+					}
+				}
+				if !found {
+					syscall.Close(fd)
+				}
 				goto next
 			}
 			if c.opening {
@@ -683,6 +675,13 @@ func serve(events Events, lns []*listener) error {
 			delete(idconn, c.id)
 			if c.action == Detach {
 				if events.Detached != nil {
+					if err = internal.DelRead(p, c.fd, &c.readon, &c.writeon); err != nil {
+						goto fail
+					}
+					if err = internal.DelWrite(p, c.fd, &c.readon, &c.writeon); err != nil {
+						goto fail
+					}
+					detached = append(detached, c.fd)
 					c.detached = true
 					if len(c.outbuf)-c.outpos > 0 {
 						c.outbuf = append(c.outbuf[:0], c.outbuf[c.outpos:]...)

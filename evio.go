@@ -8,6 +8,8 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -142,8 +144,7 @@ func Serve(events Events, addr ...string) error {
 	for _, addr := range addr {
 		var ln listener
 		var stdlibt bool
-		var opts addrOpts
-		ln.network, ln.addr, opts, stdlibt = parseAddr(addr)
+		ln.network, ln.addr, ln.opts, stdlibt = parseAddr(addr)
 		if stdlibt {
 			stdlib = true
 		}
@@ -152,13 +153,13 @@ func Serve(events Events, addr ...string) error {
 		}
 		var err error
 		if ln.network == "udp" {
-			if opts.reusePort() {
+			if ln.opts.reusePort() {
 				ln.pconn, err = reuseport.ListenPacket(ln.network, ln.addr)
 			} else {
 				ln.pconn, err = net.ListenPacket(ln.network, ln.addr)
 			}
 		} else {
-			if opts.reusePort() {
+			if ln.opts.reusePort() {
 				ln.ln, err = reuseport.Listen(ln.network, ln.addr)
 			} else {
 				ln.ln, err = net.Listen(ln.network, ln.addr)
@@ -173,7 +174,7 @@ func Serve(events Events, addr ...string) error {
 			ln.lnaddr = ln.ln.Addr()
 		}
 		if !stdlib {
-			if err := ln.system(opts); err != nil {
+			if err := ln.system(); err != nil {
 				return err
 			}
 		}
@@ -215,6 +216,7 @@ type listener struct {
 	ln      net.Listener
 	lnaddr  net.Addr
 	pconn   net.PacketConn
+	opts    addrOpts
 	f       *os.File
 	fd      int
 	network string
@@ -223,12 +225,23 @@ type listener struct {
 
 type addrOpts map[string]string
 
-func (opts *addrOpts) reusePort() bool {
-	switch (*opts)["reuseport"] {
+func (opts addrOpts) reusePort() bool {
+	switch opts["reuseport"] {
 	case "yes", "true", "1":
 		return true
 	}
 	return false
+}
+
+func (opts addrOpts) loadBalance() int {
+	n, err := strconv.ParseInt(opts["loadbalance"], 10, 16)
+	if err != nil {
+		return 1
+	}
+	if n <= 0 {
+		return runtime.NumCPU()
+	}
+	return int(n)
 }
 
 func parseAddr(addr string) (network, address string, opts addrOpts, stdlib bool) {
