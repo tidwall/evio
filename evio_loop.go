@@ -363,9 +363,11 @@ func serve(events Events, lns []*listener) error {
 				c := v.(*unixConn)
 				if now.After(v.Timeout()) {
 					timeoutqueue.Pop()
+					lock()
 					if _, ok := idconn[c.id]; ok && c.opening {
 						delete(idconn, c.id)
 						delete(fdconn, c.fd)
+						unlock()
 						filladdrs(c)
 						syscall.Close(c.fd)
 						if events.Opened != nil {
@@ -384,6 +386,8 @@ func serve(events Events, lns []*listener) error {
 							}
 						}
 						count++
+					} else {
+						unlock()
 					}
 				} else {
 					break
