@@ -17,6 +17,7 @@ import (
 )
 
 type conn struct {
+	id   int
 	is   evio.InputStream
 	addr string
 	wget bool
@@ -26,20 +27,26 @@ func main() {
 	var port int
 	var unixsocket string
 	var stdlib bool
+	var numLoops int
 	flag.IntVar(&port, "port", 6380, "server port")
 	flag.StringVar(&unixsocket, "unixsocket", "socket", "unix socket")
 	flag.BoolVar(&stdlib, "stdlib", false, "use stdlib")
+	flag.IntVar(&numLoops, "numloops", 1, "number of loops")
 	flag.Parse()
 
 	var srv evio.Server
-	var conns = make(map[int]*conn)
 	var keys = make(map[string]string)
 	var events evio.Events
+	events.NumLoops = numLoops
 	events.Serving = func(srvin evio.Server) (action evio.Action) {
 		srv = srvin
-		log.Printf("redis server started on port %d", port)
+		ss := "s"
+		if srv.NumLoops == 1 {
+			ss = ""
+		}
+		log.Printf("redis server started on port %d using %d loop%s", port, srv.NumLoops, ss)
 		if unixsocket != "" {
-			log.Printf("redis server started at %s", unixsocket)
+			log.Printf("redis server started at %s using %d loop%s", unixsocket, srv.NumLoops, ss)
 		}
 		if stdlib {
 			log.Printf("stdlib")
@@ -47,41 +54,36 @@ func main() {
 		return
 	}
 	wgetids := make(map[int]time.Time)
-	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, action evio.Action) {
-		c := &conn{}
+	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, ctx interface{}, action evio.Action) {
+		//println("opened", id)
+		c := &conn{id: id}
 		if !wgetids[id].IsZero() {
 			delete(wgetids, id)
 			c.wget = true
 		}
-		conns[id] = c
 		if c.wget {
 			log.Printf("opened: %d, wget: %t, laddr: %v, laddr: %v", id, c.wget, info.LocalAddr, info.RemoteAddr)
 		}
 		if c.wget {
 			out = []byte("GET / HTTP/1.0\r\n\r\n")
 		}
+		ctx = c
+		opts.ReuseInputBuffer = true
 		return
 	}
-	events.Tick = func() (delay time.Duration, action evio.Action) {
-		now := time.Now()
-		for id, t := range wgetids {
-			if now.Sub(t) > time.Second {
-				srv.Wake(id)
-			}
-		}
-		delay = time.Second
-		return
-	}
-	events.Closed = func(id int, err error) (action evio.Action) {
-		c := conns[id]
+	events.Closed = func(id int, ctx interface{}, err error) (action evio.Action) {
+		//println("closed", id)
+		c := ctx.(*conn)
 		if c.wget {
 			fmt.Printf("closed %d %v\n", id, err)
 		}
-		delete(conns, id)
 		return
 	}
-	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
-		c := conns[id]
+	events.Data = func(id int, ctx interface{}, in []byte) (out []byte, action evio.Action) {
+		if in == nil {
+			println("WAKE RECEIVED!")
+		}
+		c := ctx.(*conn)
 		if c.wget {
 			print(string(in))
 			return
@@ -106,6 +108,11 @@ func main() {
 				switch strings.ToUpper(string(args[0])) {
 				default:
 					out = redcon.AppendError(out, "ERR unknown command '"+string(args[0])+"'")
+				case "WAKE":
+					go func(id int) {
+						println("wake", id, srv.Wake(id))
+					}(id)
+					out = redcon.AppendOK(out)
 				case "WGET":
 					if len(args) != 3 {
 						out = redcon.AppendError(out, "ERR wrong number of arguments for '"+string(args[0])+"' command")

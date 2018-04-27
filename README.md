@@ -1,3 +1,8 @@
+# EXPERIMENTAL MULTITHREADED VERSION
+
+Set `events.NumLoops` to the number of threaded loops that you would like to use.
+
+
 <p align="center">
 <img 
     src="logo.png" 

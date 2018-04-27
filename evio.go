@@ -1,7 +1,3 @@
-// Copyright 2017 Joshua J Baker. All rights reserved.
-// Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
-
 package evio
 
 import (
@@ -11,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kavu/go_reuseport"
+	reuseport "github.com/kavu/go_reuseport"
 )
 
 // Action is an action that occurs after the completion of an event.
@@ -72,12 +68,21 @@ type Server struct {
 	// following this call. Look for socket errors from the Closed event.
 	// Not available for UDP connections.
 	Dial func(addr string, timeout time.Duration) (id int)
+	// NumLoops is the number of loops that the server is using.
+	NumLoops int
 }
 
 // Events represents the server events for the Serve call.
 // Each event has an Action return value that is used manage the state
 // of the connection and server.
 type Events struct {
+	// NumLoops sets the number of loops to use for the server. Setting this
+	// to a value greater than 1 will effectively make the server
+	// multi-threaded for multi-core machines. Which means you must take care
+	// with managing memory between all event callbacks. Setting to 0 or 1 will
+	// run the server single-threaded. Setting to -1 will automatically assign
+	// this value equal to runtime.NumProcs().
+	NumLoops int
 	// Serving fires when the server can accept connections. The server
 	// parameter has information and various utilities.
 	Serving func(server Server) (action Action)
@@ -86,10 +91,10 @@ type Events struct {
 	// it's local and remote address.
 	// Use the out return value to write data to the connection.
 	// The opts return value is used to set connection options.
-	Opened func(id int, info Info) (out []byte, opts Options, action Action)
+	Opened func(id int, info Info) (out []byte, opts Options, ctx interface{}, action Action)
 	// Closed fires when a connection has closed.
 	// The err parameter is the last known connection error.
-	Closed func(id int, err error) (action Action)
+	Closed func(id int, ctx interface{}, err error) (action Action)
 	// Detached fires when a connection has been previously detached.
 	// Once detached it's up to the receiver of this event to manage the
 	// state of the connection. The Closed event will not be called for
@@ -97,21 +102,21 @@ type Events struct {
 	// The conn parameter is a ReadWriteCloser that represents the
 	// underlying socket connection. It can be freely used in goroutines
 	// and should be closed when it's no longer needed.
-	Detached func(id int, rwc io.ReadWriteCloser) (action Action)
+	Detached func(id int, ctx interface{}, rwc io.ReadWriteCloser) (action Action)
 	// Data fires when a connection sends the server data.
 	// The in parameter is the incoming data.
 	// Use the out return value to write data to the connection.
-	Data func(id int, in []byte) (out []byte, action Action)
+	Data func(id int, ctx interface{}, in []byte) (out []byte, action Action)
 	// Prewrite fires prior to every write attempt.
 	// The amount parameter is the number of bytes that will be attempted
 	// to be written to the connection.
-	Prewrite func(id int, amount int) (action Action)
+	Prewrite func(id int, ctx interface{}, amount int) (action Action)
 	// Postwrite fires immediately after every write attempt.
 	// The amount parameter is the number of bytes that was written to the
 	// connection.
 	// The remaining parameter is the number of bytes that still remain in
 	// the buffer scheduled to be written.
-	Postwrite func(id int, amount, remaining int) (action Action)
+	Postwrite func(id int, ctx interface{}, amount, remaining int) (action Action)
 	// Tick fires immediately after the server starts and will fire again
 	// following the duration specified by the delay return value.
 	Tick func() (delay time.Duration, action Action)
@@ -151,13 +156,13 @@ func Serve(events Events, addr ...string) error {
 		}
 		var err error
 		if ln.network == "udp" {
-			if ln.opts.reusePort() {
+			if ln.opts.reusePort {
 				ln.pconn, err = reuseport.ListenPacket(ln.network, ln.addr)
 			} else {
 				ln.pconn, err = net.ListenPacket(ln.network, ln.addr)
 			}
 		} else {
-			if ln.opts.reusePort() {
+			if ln.opts.reusePort {
 				ln.ln, err = reuseport.Listen(ln.network, ln.addr)
 			} else {
 				ln.ln, err = net.Listen(ln.network, ln.addr)
@@ -179,7 +184,8 @@ func Serve(events Events, addr ...string) error {
 		lns = append(lns, &ln)
 	}
 	if stdlib {
-		return servenet(events, lns)
+		panic("asdf")
+		//return servenet(events, lns)
 	}
 	return serve(events, lns)
 }
@@ -221,20 +227,14 @@ type listener struct {
 	addr    string
 }
 
-type addrOpts map[string]string
-
-func (opts addrOpts) reusePort() bool {
-	switch opts["reuseport"] {
-	case "yes", "true", "1":
-		return true
-	}
-	return false
+type addrOpts struct {
+	reusePort bool
 }
 
 func parseAddr(addr string) (network, address string, opts addrOpts, stdlib bool) {
 	network = "tcp"
 	address = addr
-	opts = make(map[string]string)
+	opts.reusePort = false
 	if strings.Contains(address, "://") {
 		network = strings.Split(address, "://")[0]
 		address = strings.Split(address, "://")[1]
@@ -248,7 +248,17 @@ func parseAddr(addr string) (network, address string, opts addrOpts, stdlib bool
 		for _, part := range strings.Split(address[q+1:], "&") {
 			kv := strings.Split(part, "=")
 			if len(kv) == 2 {
-				opts[kv[0]] = kv[1]
+				switch kv[0] {
+				case "reuseport":
+					if len(kv[1]) != 0 {
+						switch kv[1][0] {
+						default:
+							opts.reusePort = kv[1][0] >= '1' && kv[1][0] <= '9'
+						case 'T', 't', 'Y', 'y':
+							opts.reusePort = true
+						}
+					}
+				}
 			}
 		}
 		address = address[:q]
