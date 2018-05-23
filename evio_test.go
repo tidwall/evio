@@ -25,68 +25,102 @@ func TestServe(t *testing.T) {
 	// the writes to the server will be random sizes. 0KB - 1MB.
 	// the server will echo back the data.
 	// waits for graceful connection closing.
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testServe("tcp", ":9990", false, 10)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testServe("tcp", ":9991", true, 10)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testServe("tcp-net", ":9992", false, 10)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testServe("tcp-net", ":9993", true, 10)
-	}()
-	wg.Wait()
+	t.Run("stdlib", func(t *testing.T) {
+		t.Run("tcp", func(t *testing.T) {
+			t.Run("1-loop", func(t *testing.T) {
+				testServe("tcp-net", ":9997", false, 10, 1, Random)
+			})
+			t.Run("5-loop", func(t *testing.T) {
+				testServe("tcp-net", ":9998", false, 10, 5, LeastConnections)
+			})
+			t.Run("N-loop", func(t *testing.T) {
+				testServe("tcp-net", ":9999", false, 10, -1, RoundRobin)
+			})
+		})
+		t.Run("unix", func(t *testing.T) {
+			t.Run("1-loop", func(t *testing.T) {
+				testServe("tcp-net", ":9989", true, 10, 1, Random)
+			})
+			t.Run("5-loop", func(t *testing.T) {
+				testServe("tcp-net", ":9988", true, 10, 5, LeastConnections)
+			})
+			t.Run("N-loop", func(t *testing.T) {
+				testServe("tcp-net", ":9987", true, 10, -1, RoundRobin)
+			})
+		})
+	})
+	t.Run("poll", func(t *testing.T) {
+		t.Run("tcp", func(t *testing.T) {
+			t.Run("1-loop", func(t *testing.T) {
+				testServe("tcp", ":9991", false, 10, 1, Random)
+			})
+			t.Run("5-loop", func(t *testing.T) {
+				testServe("tcp", ":9992", false, 10, 5, LeastConnections)
+			})
+			t.Run("N-loop", func(t *testing.T) {
+				testServe("tcp", ":9993", false, 10, -1, RoundRobin)
+			})
+		})
+		t.Run("unix", func(t *testing.T) {
+			t.Run("1-loop", func(t *testing.T) {
+				testServe("tcp", ":9994", true, 10, 1, Random)
+			})
+			t.Run("5-loop", func(t *testing.T) {
+				testServe("tcp", ":9995", true, 10, 5, LeastConnections)
+			})
+			t.Run("N-loop", func(t *testing.T) {
+				testServe("tcp", ":9996", true, 10, -1, RoundRobin)
+			})
+		})
+	})
+
 }
 
-func testServe(network, addr string, unix bool, nclients int) {
-	var started bool
-	var connected int
-	var disconnected int
+func testServe(network, addr string, unix bool, nclients, nloops int, balance LoadBalance) {
+	var started int32
+	var connected int32
+	var disconnected int32
 
 	var events Events
+	events.LoadBalance = balance
+	events.NumLoops = nloops
 	events.Serving = func(srv Server) (action Action) {
 		return
 	}
-	events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
-		connected++
+	events.Opened = func(c Conn) (out []byte, opts Options, action Action) {
+		c.SetContext(c)
+		atomic.AddInt32(&connected, 1)
 		out = []byte("sweetness\r\n")
 		opts.TCPKeepAlive = time.Minute * 5
-		if info.LocalAddr == nil {
+		if c.LocalAddr() == nil {
 			panic("nil local addr")
 		}
-		if info.RemoteAddr == nil {
+		if c.RemoteAddr() == nil {
 			panic("nil local addr")
 		}
 		return
 	}
-	events.Closed = func(id int, err error) (action Action) {
-		disconnected++
-		if connected == disconnected && disconnected == nclients {
+	events.Closed = func(c Conn, err error) (action Action) {
+		if c.Context() != c {
+			panic("invalid context")
+		}
+		atomic.AddInt32(&disconnected, 1)
+		if atomic.LoadInt32(&connected) == atomic.LoadInt32(&disconnected) &&
+			atomic.LoadInt32(&disconnected) == int32(nclients) {
 			action = Shutdown
 		}
 		return
 	}
-	events.Data = func(id int, in []byte) (out []byte, action Action) {
+	events.Data = func(c Conn, in []byte) (out []byte, action Action) {
 		out = in
 		return
 	}
 	events.Tick = func() (delay time.Duration, action Action) {
-		if !started {
+		if atomic.LoadInt32(&started) == 0 {
 			for i := 0; i < nclients; i++ {
-				go startClient(network, addr)
+				go startClient(network, addr, nloops)
 			}
-			started = true
+			atomic.StoreInt32(&started, 1)
 		}
 		delay = time.Second / 5
 		return
@@ -105,7 +139,8 @@ func testServe(network, addr string, unix bool, nclients int) {
 	}
 }
 
-func startClient(network, addr string) {
+func startClient(network, addr string, nloops int) {
+	onetwork := network
 	network = strings.Replace(network, "-net", "", -1)
 	rand.Seed(time.Now().UnixNano())
 	c, err := net.Dial(network, addr)
@@ -121,7 +156,7 @@ func startClient(network, addr string) {
 	if string(msg) != "sweetness\r\n" {
 		panic("bad header")
 	}
-	duration := time.Duration((rand.Float64()*2+1)*float64(time.Second)) / 4
+	duration := time.Duration((rand.Float64()*2+1)*float64(time.Second)) / 8
 	start := time.Now()
 	for time.Since(start) < duration {
 		sz := rand.Int() % (1024 * 1024)
@@ -132,115 +167,17 @@ func startClient(network, addr string) {
 		if _, err := c.Write(data); err != nil {
 			panic(err)
 		}
-		data2 := make([]byte, sz)
+		data2 := make([]byte, len(data))
 		if _, err := io.ReadFull(rd, data2); err != nil {
 			panic(err)
 		}
 		if string(data) != string(data2) {
-			fmt.Printf("mismatch: %d bytes\n", len(data))
+			fmt.Printf("mismatch %s/%d: %d vs %d bytes\n", onetwork, nloops, len(data), len(data2))
 			//panic("mismatch")
 		}
 	}
 }
 
-func TestWake(t *testing.T) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testWake("tcp", ":9991", false)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testWake("tcp", ":9992", true)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testWake("unix", "socket1", false)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testWake("unix", "socket2", true)
-	}()
-	wg.Wait()
-}
-func testWake(network, addr string, stdlib bool) {
-	var events Events
-	var srv Server
-	events.Serving = func(srvin Server) (action Action) {
-		srv = srvin
-		go func() {
-			conn, err := net.Dial(network, addr)
-			must(err)
-			defer conn.Close()
-			rd := bufio.NewReader(conn)
-			for i := 0; i < 1000; i++ {
-				line := []byte(fmt.Sprintf("msg%d\r\n", i))
-				conn.Write(line)
-				data, err := rd.ReadBytes('\n')
-				must(err)
-				if string(data) != string(line) {
-					panic("msg mismatch")
-				}
-			}
-		}()
-		return
-	}
-
-	var cid int
-	var cout []byte
-	var cin []byte
-	var cclosed bool
-	var cond = sync.NewCond(&sync.Mutex{})
-	events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
-		cid = id
-		return
-	}
-	events.Closed = func(id int, err error) (action Action) {
-		action = Shutdown
-		cond.L.Lock()
-		cclosed = true
-		cond.Broadcast()
-		cond.L.Unlock()
-		return
-	}
-	go func() {
-		cond.L.Lock()
-		for !cclosed {
-			if len(cin) > 0 {
-				cout = append(cout, cin...)
-				cin = nil
-			}
-			if len(cout) > 0 {
-				srv.Wake(cid)
-			}
-			cond.Wait()
-		}
-		cond.L.Unlock()
-	}()
-	events.Data = func(id int, in []byte) (out []byte, action Action) {
-		if in == nil {
-			cond.L.Lock()
-			out = cout
-			cout = nil
-			cond.L.Unlock()
-		} else {
-			cond.L.Lock()
-			cin = append(cin, in...)
-			cond.Broadcast()
-			cond.L.Unlock()
-		}
-		return
-	}
-	if stdlib {
-		must(Serve(events, network+"-net://"+addr))
-	} else {
-		must(Serve(events, network+"://"+addr))
-	}
-}
 func must(err error) {
 	if err != nil {
 		panic(err)
@@ -323,11 +260,11 @@ func testShutdown(network, addr string, stdlib bool) {
 	var count int
 	var clients int64
 	var N = 10
-	events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
+	events.Opened = func(c Conn) (out []byte, opts Options, action Action) {
 		atomic.AddInt64(&clients, 1)
 		return
 	}
-	events.Closed = func(id int, err error) (action Action) {
+	events.Closed = func(c Conn, err error) (action Action) {
 		atomic.AddInt64(&clients, -1)
 		return
 	}
@@ -365,28 +302,22 @@ func testShutdown(network, addr string, stdlib bool) {
 }
 
 func TestDetach(t *testing.T) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testDetach("tcp", ":9991", false)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testDetach("tcp", ":9992", true)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testDetach("unix", "socket1", false)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testDetach("unix", "socket2", true)
-	}()
-	wg.Wait()
+	t.Run("poll", func(t *testing.T) {
+		t.Run("tcp", func(t *testing.T) {
+			testDetach("tcp", ":9991", false)
+		})
+		t.Run("unix", func(t *testing.T) {
+			testDetach("unix", "socket1", false)
+		})
+	})
+	t.Run("stdlib", func(t *testing.T) {
+		t.Run("tcp", func(t *testing.T) {
+			testDetach("tcp", ":9992", true)
+		})
+		t.Run("unix", func(t *testing.T) {
+			testDetach("unix", "socket2", true)
+		})
+	})
 }
 
 func testDetach(network, addr string, stdlib bool) {
@@ -400,9 +331,9 @@ func testDetach(network, addr string, stdlib bool) {
 	expected := []byte(string(rdat) + "--detached--" + string(rdat))
 	var cin []byte
 	var events Events
-	events.Data = func(id int, in []byte) (out []byte, action Action) {
+	events.Data = func(c Conn, in []byte) (out []byte, action Action) {
 		cin = append(cin, in...)
-		if len(cin) == len(expected) {
+		if len(cin) >= len(expected) {
 			if string(cin) != string(expected) {
 				panic("mismatch client -> server")
 			}
@@ -411,49 +342,31 @@ func testDetach(network, addr string, stdlib bool) {
 		return
 	}
 
-	//expected := "detached\r\n"
 	var done int64
-	events.Detached = func(id int, conn io.ReadWriteCloser) (action Action) {
+	events.Detached = func(c Conn, conn io.ReadWriteCloser) (action Action) {
 		go func() {
+			p := make([]byte, len(expected))
 			defer conn.Close()
-			// detached connection
-			n, err := conn.Write([]byte(expected))
+			_, err := io.ReadFull(conn, p)
 			must(err)
-			if n != len(expected) {
-				panic("not enough data written")
-			}
+			conn.Write(expected)
 		}()
 		return
 	}
+
 	events.Serving = func(srv Server) (action Action) {
 		go func() {
-			// client connection
+			p := make([]byte, len(expected))
+			_ = expected
 			conn, err := net.Dial(network, addr)
 			must(err)
 			defer conn.Close()
-			_, err = conn.Write(expected)
+			conn.Write(expected)
+			_, err = io.ReadFull(conn, p)
 			must(err)
-			// read from the attached response
-			packet := make([]byte, len(expected))
-			time.Sleep(time.Second / 3)
-			_, err = io.ReadFull(conn, packet)
+			conn.Write(expected)
+			_, err = io.ReadFull(conn, p)
 			must(err)
-			if string(packet) != string(expected) {
-				panic("mismatch server -> client 1")
-			}
-			// read from the detached response
-			time.Sleep(time.Second / 3)
-			_, err = io.ReadFull(conn, packet)
-			must(err)
-			if string(packet) != string(expected) {
-				panic("mismatch server -> client 2")
-			}
-			time.Sleep(time.Second / 3)
-			_, err = conn.Read([]byte{0})
-
-			if err == nil {
-				panic("expected nil, got '" + err.Error() + "'")
-			}
 			atomic.StoreInt64(&done, 1)
 		}()
 		return
@@ -507,237 +420,16 @@ func TestInputStream(t *testing.T) {
 	}
 }
 
-func TestPrePostwrite(t *testing.T) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testPrePostwrite("tcp", ":9991", false)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testPrePostwrite("tcp", ":9992", true)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testPrePostwrite("unix", "socket1", false)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testPrePostwrite("unix", "socket2", true)
-	}()
-	wg.Wait()
-}
-
-func testPrePostwrite(network, addr string, stdlib bool) {
-	var events Events
-	var srv Server
-	var packets int
-	var tout []byte
-	events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
-		packets++
-		out = []byte(fmt.Sprintf("hello %d\r\n", packets))
-		tout = append(tout, out...)
-		srv.Wake(id)
-		return
-	}
-	events.Data = func(id int, in []byte) (out []byte, action Action) {
-		packets++
-		out = []byte(fmt.Sprintf("hello %d\r\n", packets))
-		tout = append(tout, out...)
-		srv.Wake(id)
-		return
-	}
-	events.Prewrite = func(id int, amount int) (action Action) {
-		if amount != len(tout) {
-			panic("invalid prewrite amount")
-		}
-		return
-	}
-	events.Postwrite = func(id int, amount, remaining int) (action Action) {
-		tout = tout[amount:]
-		if remaining != len(tout) {
-			panic("invalid postwrite amount")
-		}
-		return
-	}
-	events.Closed = func(id int, err error) (action Action) {
-		action = Shutdown
-		return
-	}
-	events.Serving = func(srvin Server) (action Action) {
-		srv = srvin
-		go func() {
-			conn, err := net.Dial(network, addr)
-			must(err)
-			defer conn.Close()
-			rd := bufio.NewReader(conn)
-			for i := 0; i < 1000; i++ {
-				line, err := rd.ReadBytes('\n')
-				must(err)
-				ex := fmt.Sprintf("hello %d\r\n", i+1)
-				if string(line) != ex {
-					panic(fmt.Sprintf("expected '%v', got '%v'", ex, line))
-				}
-			}
-		}()
-		return
-	}
-	if stdlib {
-		must(Serve(events, network+"-net://"+addr))
-	} else {
-		must(Serve(events, network+"://"+addr))
-	}
-}
-
-func TestTranslate(t *testing.T) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testTranslate("tcp", ":9991", "passthrough", false)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testTranslate("tcp", ":9992", "passthrough", true)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testTranslate("unix", "socket1", "passthrough", false)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		testTranslate("unix", "socket2", "passthrough", true)
-	}()
-	wg.Wait()
-}
-
-func testTranslate(network, addr string, kind string, stdlib bool) {
-	var events Events
-	events.Data = func(id int, in []byte) (out []byte, action Action) {
-		out = in
-		return
-	}
-	events.Closed = func(id int, err error) (action Action) {
-		action = Shutdown
-		return
-	}
-	events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
-		out = []byte("sweetness\r\n")
-		return
-	}
-	events.Serving = func(srv Server) (action Action) {
-		go func() {
-			conn, err := net.Dial(network, addr)
-			must(err)
-			defer conn.Close()
-			line := "sweetness\r\n"
-			packet := make([]byte, len(line))
-			n, err := io.ReadFull(conn, packet)
-			must(err)
-			if n != len(line) {
-				panic("invalid amount")
-			}
-			if string(packet) != string(line) {
-				panic(fmt.Sprintf("expected '%v', got '%v'\n", line, packet))
-			}
-			for i := 0; i < 100; i++ {
-				line := fmt.Sprintf("hello %d\r\n", i)
-				n, err := conn.Write([]byte(line))
-				must(err)
-				if n != len(line) {
-					panic("invalid amount")
-				}
-				packet := make([]byte, len(line))
-				n, err = io.ReadFull(conn, packet)
-				must(err)
-				if n != len(line) {
-					panic("invalid amount")
-				}
-				if string(packet) != string(line) {
-					panic(fmt.Sprintf("expected '%v', got '%v'\n", line, packet))
-				}
-			}
-		}()
-		return
-	}
-
-	tevents := Translate(events,
-		func(id int, info Info) bool {
-			return true
-		},
-		func(id int, rw io.ReadWriter) io.ReadWriter {
-			switch kind {
-			case "passthrough":
-				return rw
-			}
-			panic("invalid kind")
-		},
-	)
-
-	if stdlib {
-		must(Serve(tevents, network+"-net://"+addr))
-	} else {
-		must(Serve(tevents, network+"://"+addr))
-	}
-
-	// test with no shoulds
-	tevents = Translate(events,
-		func(id int, info Info) bool {
-			return false
-		},
-		func(id int, rw io.ReadWriter) io.ReadWriter {
-			return rw
-		},
-	)
-	if stdlib {
-		must(Serve(tevents, network+"-net://"+addr))
-	} else {
-		must(Serve(tevents, network+"://"+addr))
-	}
-}
-
-// func TestVariousAddr(t *testing.T) {
-// 	var events Events
-// 	var kind string
-// 	events.Serving = func(wake func(id int) bool, addrs []net.Addr) (action Action) {
-// 		addr := addrs[0].(*net.TCPAddr)
-// 		if (kind == "tcp4" && len(addr.IP) != 4) || (kind == "tcp6" && len(addr.IP) != 16) {
-// 			println(len(addr.IP))
-// 			panic("invalid ip")
-// 		}
-// 		go func(kind string) {
-// 			conn, err := net.Dial(kind, ":9991")
-// 			must(err)
-// 			defer conn.Close()
-// 		}(kind)
-// 		return
-// 	}
-// 	events.Closed = func(id int, err error) (action Action) {
-// 		return Shutdown
-// 	}
-// 	kind = "tcp4"
-// 	must(Serve(events, "tcp4://:9991"))
-// 	kind = "tcp6"
-// 	must(Serve(events, "tcp6://:9991"))
-// }
-
 func TestReuseInputBuffer(t *testing.T) {
 	reuses := []bool{true, false}
 	for _, reuse := range reuses {
 		var events Events
-		events.Opened = func(id int, info Info) (out []byte, opts Options, action Action) {
+		events.Opened = func(c Conn) (out []byte, opts Options, action Action) {
 			opts.ReuseInputBuffer = reuse
 			return
 		}
 		var prev []byte
-		events.Data = func(id int, in []byte) (out []byte, action Action) {
+		events.Data = func(c Conn, in []byte) (out []byte, action Action) {
 			if prev == nil {
 				prev = in
 			} else {
@@ -763,4 +455,24 @@ func TestReuseInputBuffer(t *testing.T) {
 		must(Serve(events, "tcp://:9991"))
 	}
 
+}
+
+func TestReuseport(t *testing.T) {
+	var events Events
+	events.Serving = func(s Server) (action Action) {
+		return Shutdown
+	}
+	var wg sync.WaitGroup
+	wg.Add(5)
+	for i := 0; i < 5; i++ {
+		var t = "1"
+		if i%2 == 0 {
+			t = "true"
+		}
+		go func(t string) {
+			defer wg.Done()
+			must(Serve(events, "tcp://:9991?reuseport="+t))
+		}(t)
+	}
+	wg.Wait()
 }

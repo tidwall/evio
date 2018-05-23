@@ -6,10 +6,8 @@ package main
 
 import (
 	"bytes"
-	"crypto/tls"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"strconv"
@@ -28,26 +26,20 @@ type request struct {
 	remoteAddr    string
 }
 
-type conn struct {
-	info evio.Info
-	is   evio.InputStream
-}
-
 func main() {
 	var port int
-	var tlsport int
-	var tlspem string
+	var loops int
 	var aaaa bool
 	var noparse bool
 	var unixsocket string
 	var stdlib bool
+
 	flag.StringVar(&unixsocket, "unixsocket", "", "unix socket")
 	flag.IntVar(&port, "port", 8080, "server port")
-	flag.IntVar(&tlsport, "tlsport", 4443, "tls port")
-	flag.StringVar(&tlspem, "tlscert", "", "tls pem cert/key file")
 	flag.BoolVar(&aaaa, "aaaa", false, "aaaaa....")
 	flag.BoolVar(&noparse, "noparse", true, "do not parse requests")
 	flag.BoolVar(&stdlib, "stdlib", false, "use stdlib")
+	flag.IntVar(&loops, "loops", 0, "num loops")
 	flag.Parse()
 
 	if os.Getenv("NOPARSE") == "1" {
@@ -61,13 +53,9 @@ func main() {
 	}
 
 	var events evio.Events
-	var conns = make(map[int]*conn)
-
-	events.Serving = func(server evio.Server) (action evio.Action) {
-		log.Printf("http server started on port %d", port)
-		if tlspem != "" {
-			log.Printf("https server started on port %d", tlsport)
-		}
+	events.NumLoops = loops
+	events.Serving = func(srv evio.Server) (action evio.Action) {
+		log.Printf("http server started on port %d (loops: %d)", port, srv.NumLoops)
 		if unixsocket != "" {
 			log.Printf("http server started at %s", unixsocket)
 		}
@@ -77,29 +65,23 @@ func main() {
 		return
 	}
 
-	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, action evio.Action) {
-		conns[id] = &conn{info: info}
-		log.Printf("opened: %d: laddr: %v: raddr: %v", id, info.LocalAddr, info.RemoteAddr)
-
-		// println(info.LocalAddr.(*net.TCPAddr).Zone)
-		// fmt.Printf("%#v\n", info.LocalAddr)
-		// fmt.Printf("%#v\n", (&net.TCPAddr{IP: make([]byte, 16)}))
+	events.Opened = func(c evio.Conn) (out []byte, opts evio.Options, action evio.Action) {
+		c.SetContext(&evio.InputStream{})
+		//log.Printf("opened: laddr: %v: raddr: %v", c.LocalAddr(), c.RemoteAddr())
 		return
 	}
 
-	events.Closed = func(id int, err error) (action evio.Action) {
-		c := conns[id]
-		log.Printf("closed: %d: %s: %s", id, c.info.LocalAddr.String(), c.info.RemoteAddr.String())
-		delete(conns, id)
+	events.Closed = func(c evio.Conn, err error) (action evio.Action) {
+		//log.Printf("closed: %s: %s", c.LocalAddr().String(), c.RemoteAddr().String())
 		return
 	}
 
-	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
+	events.Data = func(c evio.Conn, in []byte) (out []byte, action evio.Action) {
 		if in == nil {
 			return
 		}
-		c := conns[id]
-		data := c.is.Begin(in)
+		is := c.Context().(*evio.InputStream)
+		data := is.Begin(in)
 		if noparse && bytes.Contains(data, []byte("\r\n\r\n")) {
 			// for testing minimal single packet request -> response.
 			out = appendresp(nil, "200 OK", "", res)
@@ -119,11 +101,11 @@ func main() {
 				break
 			}
 			// handle the request
-			req.remoteAddr = c.info.RemoteAddr.String()
+			req.remoteAddr = c.RemoteAddr().String()
 			out = appendhandle(out, &req)
 			data = leftover
 		}
-		c.is.End(data)
+		is.End(data)
 		return
 	}
 	var ssuf string
@@ -132,31 +114,6 @@ func main() {
 	}
 	// We at least want the single http address.
 	addrs := []string{fmt.Sprintf("tcp"+ssuf+"://:%d", port)}
-	if tlspem != "" {
-		// load the cert and key pair from the concat'd pem file.
-		cer, err := tls.LoadX509KeyPair(tlspem, tlspem)
-		if err != nil {
-			log.Fatal(err)
-		}
-		config := &tls.Config{Certificates: []tls.Certificate{cer}}
-		// Update the address list to include https.
-		addrs = append(addrs, fmt.Sprintf("tcp"+ssuf+"://:%d", tlsport))
-
-		// TLS translate the events
-		events = evio.Translate(events,
-			func(id int, info evio.Info) bool {
-				// only translate for the second address.
-				return info.AddrIndex == 1
-			},
-			func(id int, rw io.ReadWriter) io.ReadWriter {
-				// Use the standard Go crypto/tls package and create a tls.Conn
-				// from the provided io.ReadWriter. Here we use the handy
-				// evio.NopConn utility to create a barebone net.Conn in order
-				// for the tls.Server to accept the connection.
-				return tls.Server(evio.NopConn(rw), config)
-			},
-		)
-	}
 	if unixsocket != "" {
 		addrs = append(addrs, fmt.Sprintf("unix"+ssuf+"://%s", unixsocket))
 	}
