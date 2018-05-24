@@ -47,7 +47,7 @@ This will retrieve the library.
 
 ### Usage
 
-Starting a server is easy with `evio`. Just set up your events and pass them to the `Serve` function along with the binding address(es). Each connections receives an ID that's passed to various events to differentiate the clients. At any point you can close a client or shutdown the server by return a `Close` or `Shutdown` action from an event.
+Starting a server is easy with `evio`. Just set up your events and pass them to the `Serve` function along with the binding address(es). Each connections is represented as an `evio.Conn` object that is passed to various events to differentiate the clients. At any point you can close a client or shutdown the server by return a `Close` or `Shutdown` action from an event.
 
 Example echo server that binds to port 5000:
 
@@ -90,7 +90,7 @@ The event type has a bunch of handy events:
 
 ### Multiple addresses
 
-An server can bind to multiple addresses and share the same event loop.
+A server can bind to multiple addresses and share the same event loop.
 
 ```go
 evio.Serve(events, "tcp://192.168.0.10:5000", "unix://socket")
@@ -119,9 +119,9 @@ The `Serve` function can bind to UDP addresses.
 ## Multithreaded
 
 The `events.NumLoops` options sets the number of loops to use for the server. 
-Setting this to a value greater than 1 will effectively make the server multithreaded for multi-core machines. 
-Which means you must take care with synchonizing memory between all event callbacks. 
-Setting to 0 or 1 will run the server single-threaded. 
+A value greater than 1 will effectively make the server multithreaded for multi-core machines. 
+Which means you must take care when synchonizing memory between event callbacks. 
+Setting to 0 or 1 will run the server as single-threaded. 
 Setting to -1 will automatically assign this value equal to `runtime.NumProcs()`.
 
 ## Load balancing
