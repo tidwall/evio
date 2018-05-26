@@ -315,6 +315,9 @@ func loopUDPRead(s *server, l *loop, lnidx, fd int) error {
 		in := append([]byte{}, l.packet[:n]...)
 		out, action := s.events.Data(c, in)
 		if len(out) > 0 {
+			if s.events.PreWrite != nil {
+				s.events.PreWrite()
+			}
 			syscall.Sendto(fd, out, 0, sa)
 		}
 		switch action {
@@ -350,6 +353,9 @@ func loopOpened(s *server, l *loop, c *conn) error {
 }
 
 func loopWrite(s *server, l *loop, c *conn) error {
+	if s.events.PreWrite != nil {
+		s.events.PreWrite()
+	}
 	n, err := syscall.Write(c.fd, c.out)
 	if err != nil {
 		if err == syscall.EAGAIN {

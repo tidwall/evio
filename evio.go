@@ -111,6 +111,8 @@ type Events struct {
 	// underlying socket connection. It can be freely used in goroutines
 	// and should be closed when it's no longer needed.
 	Detached func(c Conn, rwc io.ReadWriteCloser) (action Action)
+	// PreWrite fires just before any data is written to any client socket.
+	PreWrite func()
 	// Data fires when a connection sends the server data.
 	// The in parameter is the incoming data.
 	// Use the out return value to write data to the connection.
