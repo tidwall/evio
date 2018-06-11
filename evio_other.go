@@ -29,7 +29,7 @@ func (ln *listener) system() error {
 }
 
 func serve(events Events, listeners []*listener) error {
-	return servenet(events, listeners)
+	return stdserve(events, listeners)
 }
 
 func reuseportListenPacket(proto, addr string) (l net.PacketConn, err error) {
