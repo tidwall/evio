@@ -58,13 +58,20 @@ func main() {
 		return
 	}
 	events.Opened = func(ec evio.Conn) (out []byte, opts evio.Options, action evio.Action) {
+		//fmt.Printf("opened: %v\n", ec.RemoteAddr())
 		ec.SetContext(&conn{})
 		return
 	}
 	events.Closed = func(ec evio.Conn, err error) (action evio.Action) {
+		// fmt.Printf("closed: %v\n", ec.RemoteAddr())
 		return
 	}
+
 	events.Data = func(ec evio.Conn, in []byte) (out []byte, action evio.Action) {
+		if in == nil {
+			log.Printf("wake from %s\n", ec.RemoteAddr())
+			return nil, evio.Close
+		}
 		c := ec.Context().(*conn)
 		data := c.is.Begin(in)
 		var n int
@@ -94,6 +101,9 @@ func main() {
 					} else {
 						out = redcon.AppendString(out, "PONG")
 					}
+				case "WAKE":
+					go ec.Wake()
+					out = redcon.AppendString(out, "OK")
 				case "ECHO":
 					if len(args) != 2 {
 						out = redcon.AppendError(out, "ERR wrong number of arguments for '"+string(args[0])+"' command")

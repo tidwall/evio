@@ -40,6 +40,7 @@ func (c *stdudpconn) SetContext(ctx interface{}) {}
 func (c *stdudpconn) AddrIndex() int             { return c.addrIndex }
 func (c *stdudpconn) LocalAddr() net.Addr        { return c.localAddr }
 func (c *stdudpconn) RemoteAddr() net.Addr       { return c.remoteAddr }
+func (c *stdudpconn) Wake()                      {}
 
 type stdloop struct {
 	idx   int               // loop index
@@ -59,16 +60,22 @@ type stdconn struct {
 	done       int32       // 0: attached, 1: closed, 2: detached
 }
 
+type wakeReq struct {
+	c *stdconn
+}
+
 func (c *stdconn) Context() interface{}       { return c.ctx }
 func (c *stdconn) SetContext(ctx interface{}) { c.ctx = ctx }
 func (c *stdconn) AddrIndex() int             { return c.addrIndex }
 func (c *stdconn) LocalAddr() net.Addr        { return c.localAddr }
 func (c *stdconn) RemoteAddr() net.Addr       { return c.remoteAddr }
+func (c *stdconn) Wake()                      { c.loop.ch <- wakeReq{c} }
 
 type stdin struct {
 	c  *stdconn
 	in []byte
 }
+
 type stderr struct {
 	c   *stdconn
 	err error
@@ -267,6 +274,8 @@ func stdloopRun(s *stdserver, l *stdloop) {
 				err = stdloopReadUDP(s, l, v)
 			case *stderr:
 				err = stdloopError(s, l, v.c, v.err)
+			case wakeReq:
+				err = stdloopRead(s, l, v.c, nil)
 			}
 		}
 		if err != nil {
@@ -359,6 +368,8 @@ func (c *stddetachedConn) Write(p []byte) (n int, err error) {
 func (c *stddetachedConn) Close() error {
 	return c.conn.Close()
 }
+
+func (c *stddetachedConn) Wake() {}
 
 func stdloopRead(s *stdserver, l *stdloop, c *stdconn, in []byte) error {
 	if atomic.LoadInt32(&c.done) == 2 {

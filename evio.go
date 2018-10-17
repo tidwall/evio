@@ -60,6 +60,8 @@ type Conn interface {
 	LocalAddr() net.Addr
 	// RemoteAddr is the connection's remote peer address.
 	RemoteAddr() net.Addr
+	// Wake triggers a Data event for this connection.
+	Wake()
 }
 
 // LoadBalance sets the load balancing method.

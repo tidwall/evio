@@ -22,16 +22,16 @@ import (
 type conn struct {
 	fd         int              // file descriptor
 	lnidx      int              // listener index in the server lns list
-	loopidx    int              // owner loop
 	out        []byte           // write buffer
 	sa         syscall.Sockaddr // remote socket address
 	reuse      bool             // should reuse input buffer
 	opened     bool             // connection opened event fired
 	action     Action           // next user action
 	ctx        interface{}      // user-defined context
-	addrIndex  int
-	localAddr  net.Addr
-	remoteAddr net.Addr
+	addrIndex  int              // index of listening address
+	localAddr  net.Addr         // local addre
+	remoteAddr net.Addr         // remote addr
+	loop       *loop            // connected loop
 }
 
 func (c *conn) Context() interface{}       { return c.ctx }
@@ -39,6 +39,11 @@ func (c *conn) SetContext(ctx interface{}) { c.ctx = ctx }
 func (c *conn) AddrIndex() int             { return c.addrIndex }
 func (c *conn) LocalAddr() net.Addr        { return c.localAddr }
 func (c *conn) RemoteAddr() net.Addr       { return c.remoteAddr }
+func (c *conn) Wake() {
+	if c.loop != nil {
+		c.loop.poll.Trigger(c)
+	}
+}
 
 type server struct {
 	events   Events             // user events
@@ -198,6 +203,12 @@ func loopNote(s *server, l *loop, note interface{}) error {
 		s.tch <- delay
 	case error: // shutdown
 		err = v
+	case *conn:
+		// Wake called for connection
+		if l.fdconns[v.fd] != v {
+			return nil // ignore stale wakes
+		}
+		return loopWake(s, l, v)
 	}
 	return err
 }
@@ -258,7 +269,8 @@ func loopAccept(s *server, l *loop, fd int) error {
 						}
 					}
 				case RoundRobin:
-					if int(atomic.LoadUintptr(&s.accepted))%len(s.loops) != l.idx {
+					idx := int(atomic.LoadUintptr(&s.accepted)) % len(s.loops)
+					if idx != l.idx {
 						return nil // do not accept
 					}
 					atomic.AddUintptr(&s.accepted, 1)
@@ -277,7 +289,7 @@ func loopAccept(s *server, l *loop, fd int) error {
 			if err := syscall.SetNonblock(nfd, true); err != nil {
 				return err
 			}
-			c := &conn{fd: nfd, sa: sa, lnidx: i}
+			c := &conn{fd: nfd, sa: sa, lnidx: i, loop: l}
 			l.fdconns[c.fd] = c
 			l.poll.AddReadWrite(c.fd)
 			atomic.AddInt32(&l.count, 1)
@@ -387,6 +399,21 @@ func loopAction(s *server, l *loop, c *conn) error {
 	}
 	if len(c.out) == 0 && c.action == None {
 		l.poll.ModRead(c.fd)
+	}
+	return nil
+}
+
+func loopWake(s *server, l *loop, c *conn) error {
+	if s.events.Data == nil {
+		return nil
+	}
+	out, action := s.events.Data(c, nil)
+	c.action = action
+	if len(out) > 0 {
+		c.out = append([]byte{}, out...)
+	}
+	if len(c.out) != 0 || c.action != None {
+		l.poll.ModReadWrite(c.fd)
 	}
 	return nil
 }
