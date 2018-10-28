@@ -9,17 +9,9 @@
 
 `evio` is an event loop networking framework that is fast and small. It makes direct [epoll](https://en.wikipedia.org/wiki/Epoll) and [kqueue](https://en.wikipedia.org/wiki/Kqueue) syscalls rather than using the standard Go [net](https://golang.org/pkg/net/) package, and works in a similar manner as [libuv](https://github.com/libuv/libuv) and [libevent](https://github.com/libevent/libevent).
 
-The goal of this project is to create a server framework for Go that performs on par with [Redis](http://redis.io) and [Haproxy](http://www.haproxy.org) for packet handling. My hope is to use this as a foundation for [Tile38](https://github.com/tidwall/tile38) and a future L7 proxy for Go... and a bunch of other stuff.
+The goal of this project is to create a server framework for Go that performs on par with [Redis](http://redis.io) and [Haproxy](http://www.haproxy.org) for packet handling. It was built to be the foundation for [Tile38](https://github.com/tidwall/tile38) and a future L7 proxy for Go.
 
-**Just to be perfectly clear**
-
-This project is not intended to be a general purpose replacement for the standard Go net package or goroutines. It's for building specialized services such as key value stores, L7 proxies, static websites, etc.
-
-You would not want to use this framework if you need to handle long-running requests (milliseconds or more). For example, a web api that needs to connect to a mongo database, authenticate, and respond; just use the Go net/http package instead.
-
-There are many popular event loop based applications in the wild such as Nginx, Haproxy, Redis, and Memcached. All of these are very fast and written in C.
-
-The reason I wrote this framework is so that I can build certain networking services that perform like the C apps above, but I also want to continue to work in Go.
+*Please note: Evio should not be considered as a drop-in replacement for the standard Go net or net/http packages.*
 
 ## Features
 
