@@ -7,6 +7,7 @@
 package evio
 
 import (
+	"io"
 	"net"
 	"os"
 	"runtime"
@@ -458,7 +459,17 @@ func (c *detachedConn) Close() error {
 }
 
 func (c *detachedConn) Read(p []byte) (n int, err error) {
-	return syscall.Read(c.fd, p)
+	n, err = syscall.Read(c.fd, p)
+	if err != nil {
+		return n, err
+	}
+	if n == 0 {
+		if len(p) == 0 {
+			return 0, nil
+		}
+		return 0, io.EOF
+	}
+	return n, nil
 }
 
 func (c *detachedConn) Write(p []byte) (n int, err error) {
