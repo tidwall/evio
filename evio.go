@@ -119,6 +119,10 @@ type Events struct {
 	// The in parameter is the incoming data.
 	// Use the out return value to write data to the connection.
 	Data func(c Conn, in []byte) (out []byte, action Action)
+
+	Receive func(c Conn, in []byte) (out []byte, action Action)
+	Send    func(c Conn) (out []byte, action Action)
+
 	// Tick fires immediately after the server starts and will fire again
 	// following the duration specified by the delay return value.
 	Tick func() (delay time.Duration, action Action)
@@ -265,4 +269,18 @@ func parseAddr(addr string) (network, address string, opts addrOpts, stdlib bool
 		address = address[:q]
 	}
 	return
+}
+
+// Use Receive() and Send() instead of Data()
+func DispatchEvents(events Events) Events {
+	if events.Send == nil && events.Data != nil {
+		events.Send = func(c Conn) (out []byte, action Action) {
+			out, action = events.Data(c, nil)
+			return
+		}
+	}
+	if events.Receive == nil {
+		events.Receive = events.Data
+	}
+	return events
 }

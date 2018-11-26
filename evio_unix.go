@@ -93,7 +93,7 @@ func serve(events Events, listeners []*listener) error {
 	}
 
 	s := &server{}
-	s.events = events
+	s.events = DispatchEvents(events)
 	s.lns = listeners
 	s.cond = sync.NewCond(&sync.Mutex{})
 	s.balance = events.LoadBalance
@@ -305,7 +305,7 @@ func loopUDPRead(s *server, l *loop, lnidx, fd int) error {
 	if err != nil || n == 0 {
 		return nil
 	}
-	if s.events.Data != nil {
+	if s.events.Receive != nil {
 		var sa6 syscall.SockaddrInet6
 		switch sa := sa.(type) {
 		case *syscall.SockaddrInet4:
@@ -326,7 +326,7 @@ func loopUDPRead(s *server, l *loop, lnidx, fd int) error {
 		c.localAddr = s.lns[lnidx].lnaddr
 		c.remoteAddr = internal.SockaddrToAddr(&sa6)
 		in := append([]byte{}, l.packet[:n]...)
-		out, action := s.events.Data(c, in)
+		out, action := s.events.Receive(c, in)
 		if len(out) > 0 {
 			if s.events.PreWrite != nil {
 				s.events.PreWrite()
@@ -405,10 +405,10 @@ func loopAction(s *server, l *loop, c *conn) error {
 }
 
 func loopWake(s *server, l *loop, c *conn) error {
-	if s.events.Data == nil {
+	if s.events.Send == nil {
 		return nil
 	}
-	out, action := s.events.Data(c, nil)
+	out, action := s.events.Send(c)
 	c.action = action
 	if len(out) > 0 {
 		c.out = append([]byte{}, out...)
@@ -432,8 +432,8 @@ func loopRead(s *server, l *loop, c *conn) error {
 	if !c.reuse {
 		in = append([]byte{}, in...)
 	}
-	if s.events.Data != nil {
-		out, action := s.events.Data(c, in)
+	if s.events.Receive != nil {
+		out, action := s.events.Receive(c, in)
 		c.action = action
 		if len(out) > 0 {
 			c.out = append([]byte{}, out...)

@@ -77,7 +77,8 @@ The event type has a bunch of handy events:
 - `Opened` fires when a connection has opened.
 - `Closed` fires when a connection has closed.
 - `Detach` fires when a connection has been detached using the `Detach` return action.
-- `Data` fires when the server receives new data from a connection.
+- `Receive` fires when the server receives new data from a connection.
+- `Send` fires when the server is waked up for sending data.
 - `Tick` fires immediately after the server starts and will fire again after a specified interval.
 
 ### Multiple addresses

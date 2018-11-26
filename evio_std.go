@@ -109,7 +109,7 @@ func stdserve(events Events, listeners []*listener) error {
 	}
 
 	s := &stdserver{}
-	s.events = events
+	s.events = DispatchEvents(events)
 	s.lns = listeners
 	s.cond = sync.NewCond(&sync.Mutex{})
 
@@ -373,33 +373,42 @@ func (c *stddetachedConn) Wake() {}
 
 func stdloopRead(s *stdserver, l *stdloop, c *stdconn, in []byte) error {
 	if atomic.LoadInt32(&c.done) == 2 {
-		// should not ignore reads for detached connections
-		c.donein = append(c.donein, in...)
+		if in != nil {
+			// should not ignore reads for detached connections
+			c.donein = append(c.donein, in...)
+		}
 		return nil
 	}
-	if s.events.Data != nil {
-		out, action := s.events.Data(c, in)
-		if len(out) > 0 {
-			if s.events.PreWrite != nil {
-				s.events.PreWrite()
-			}
-			c.conn.Write(out)
-		}
-		switch action {
-		case Shutdown:
-			return errClosing
-		case Detach:
-			return stdloopDetach(s, l, c)
-		case Close:
-			return stdloopClose(s, l, c)
-		}
+	var (
+		err    error
+		out    []byte
+		action Action = None
+	)
+	if in == nil && s.events.Send != nil {
+		out, action = s.events.Send(c)
+	} else if in != nil && s.events.Receive != nil {
+		out, action = s.events.Receive(c, in)
 	}
-	return nil
+	if len(out) > 0 {
+		if s.events.PreWrite != nil {
+			s.events.PreWrite()
+		}
+		_, err = c.conn.Write(out)
+	}
+	switch action {
+	case Shutdown:
+		return errClosing
+	case Detach:
+		return stdloopDetach(s, l, c)
+	case Close:
+		return stdloopClose(s, l, c)
+	}
+	return err
 }
 
 func stdloopReadUDP(s *stdserver, l *stdloop, c *stdudpconn) error {
-	if s.events.Data != nil {
-		out, action := s.events.Data(c, c.in)
+	if s.events.Receive != nil {
+		out, action := s.events.Receive(c, c.in)
 		if len(out) > 0 {
 			if s.events.PreWrite != nil {
 				s.events.PreWrite()
