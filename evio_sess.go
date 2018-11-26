@@ -65,10 +65,7 @@ func main() {
 
 package evio
 
-import (
-	"bytes"
-	"sync"
-)
+import "sync"
 
 // Conn map, use session id as the key
 var registry sync.Map
