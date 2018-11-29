@@ -7,6 +7,8 @@ Example:
 package main
 
 import (
+	"errors"
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -24,21 +26,53 @@ func RandomGUID() string {
 }
 
 type Session struct {
-	id string
+	uid     string
+	SessId  string
 	// ... Add other data
 }
 
 // Create empty session
 func NewSession() *Session {
-	return &Session{id:RandomGUID()}
+	return &Session{SessId:RandomGUID()}
 }
 
 func (sess *Session) GetId() string {
-	return sess.id
+	return sess.uid
 }
 
-func (sess *Session) SetId(id string) {
-	sess.id = id
+func (sess *Session) SetId(uid string) {
+	sess.uid = uid
+}
+
+func GetClientId(in []byte) (uid string) {
+	// if len(in) > 15 {
+	//     uid = string(in[:15])
+	// } else {
+	//     uid = string(in)
+	// }
+	return
+}
+
+func GetSessAndId(c evio.Conn) (sess *Session, uid string) {
+	if cxt := evio.GetSession(c); cxt != nil {
+		sess = cxt.(*Session)
+		uid = sess.GetId()
+	}
+	return
+}
+
+func WakeupConn(uid string) (err error) {
+	c := evio.FindConnById(uid)
+	if c == nil {
+		err = errors.New(fmt.Sprintf("Connection %s is closed", uid))
+		return
+	}
+	sess, _ := GetSessAndId(c)
+	// Store other data for send
+	// sess.xxx = ...
+	evio.SaveSession(c, sess)
+	c.Wake() // send data
+	return
 }
 
 func main() {
@@ -48,11 +82,17 @@ func main() {
 		evio.BindSession(c, sess)
 	}
 	events.Data = func(c evio.Conn, in []byte) (out []byte, action evio.Action) {
-		if cxt := evio.GetSession(c); cxt != nil {
-			sess := cxt.(*Session)
-			// Store other data
-			// sess.xxx = ...
-			evio.SaveSession(sess)
+		sess, uid := GetSessAndId(c)
+		if sess == nil {
+			sess = NewSession()
+		}
+		if in == nil { // Send, call by Wake()
+			// out = sess.xxx
+		} else if uid == "" { // Receive, first time
+			if uid = GetClientId(in); uid != "" {
+				sess.SetId(uid)
+				evio.BindSession(c, sess)
+			}
 		}
 		return
 	}
@@ -84,43 +124,63 @@ func FindConnById(id string) Conn {
 	return nil
 }
 
-// Get connection and session id
-func FindConn(sess ISession) (string, Conn) {
-	if id := sess.GetId(); id != "" {
-		return id, FindConnById(id)
-	}
-	return "", nil
-}
-
-// Get Session of current connection, called by Events.Receive() or Events.Closed() usually
+// Get session of current connection
 func GetSession(c Conn) interface{} {
+	if c == nil {
+		return nil
+	}
 	return c.Context()
 }
 
-// Destroy Session, called by Events.Closed() usually
-func DestroySession(c Conn) {
-	if cxt := GetSession(c); cxt != nil {
-		sess := cxt.(ISession)
-		if id := sess.GetId(); id != "" {
-			registry.Delete(id)
-		}
-		c.SetContext(nil)
+// Get only the id of session
+func GetSessionId(cxt interface{}) string {
+	if cxt == nil {
+		return ""
 	}
-}
-
-// Create Session with a connection, called by Events.Opened() usually
-func BindSession(c Conn, sess ISession) {
-	c.SetContext(sess)
-	if id := sess.GetId(); id != "" {
-		registry.Store(id, c)
+	if sess := cxt.(ISession); sess != nil {
+		return sess.GetId()
 	}
+	return ""
 }
 
 // Save to the context of connection, after changed session data
-func SaveSession(sess ISession) bool {
-	if _, c := FindConn(sess); c != nil {
-		c.SetContext(sess)
-		return true
+func SaveSession(c Conn, sess ISession) string {
+	id := sess.GetId()
+	if c == nil && id != "" {
+		c = FindConnById(id)
 	}
-	return false
+	if c != nil {
+		c.SetContext(sess)
+	}
+	return id
+}
+
+// Create session with a connection, called by Events.Opened() usually
+func BindSession(c Conn, sess ISession) (success bool) {
+	if c == nil {
+		return
+	}
+	cxt := GetSession(c)
+	if id := GetSessionId(cxt); id != "" {
+		registry.Delete(id)
+	}
+	if id := SaveSession(c, sess); id != "" {
+		registry.Store(id, c)
+		success = true
+	}
+	return
+}
+
+// Destroy session, called by Events.Closed() usually
+func DestroySession(c Conn) (found bool) {
+	cxt := GetSession(c)
+	if cxt == nil {
+		return
+	}
+	if id := GetSessionId(cxt); id != "" {
+		registry.Delete(id)
+		found = true
+	}
+	c.SetContext(nil)
+	return
 }
