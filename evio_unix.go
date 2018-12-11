@@ -422,12 +422,17 @@ func loopWake(s *server, l *loop, c *conn) error {
 func loopRead(s *server, l *loop, c *conn) error {
 	var in []byte
 	n, err := syscall.Read(c.fd, l.packet)
-	if n == 0 || err != nil {
+	if err != nil {
 		if err == syscall.EAGAIN {
 			return nil
 		}
 		return loopCloseConn(s, l, c, err)
 	}
+	// if n is empty, return nil for next incoming data
+	if n == 0 {
+		return nil
+	}
+
 	in = l.packet[:n]
 	if !c.reuse {
 		in = append([]byte{}, in...)
