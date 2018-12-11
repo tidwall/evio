@@ -429,7 +429,7 @@ func loopRead(s *server, l *loop, c *conn) error {
 		return loopCloseConn(s, l, c, err)
 	}
 
-	// when data is empty return not close
+	// when read result is empty return, and wait for next incoming data
 	if n == 0 {
 		return nil
 	}
