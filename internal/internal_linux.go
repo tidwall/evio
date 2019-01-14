@@ -23,7 +23,7 @@ func OpenPoll() *Poll {
 		panic(err)
 	}
 	l.fd = p
-	r0, _, e0 := syscall.Syscall(syscall.SYS_EVENTFD, 0, 0, 0)
+	r0, _, e0 := syscall.Syscall(syscall.SYS_EVENTFD2, 0, 0, 0)
 	if e0 != 0 {
 		syscall.Close(p)
 		panic(err)
