@@ -29,7 +29,7 @@ type conn struct {
 	opened     bool             // connection opened event fired
 	action     Action           // next user action
 	ctx        interface{}      // user-defined context
-	addrIndex  int				// index of listening address
+	addrIndex  int              // index of listening address
 	localAddr  net.Addr         // local addre
 	remoteAddr net.Addr         // remote addr
 	loop       *loop            // connected loop
