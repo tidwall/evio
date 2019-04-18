@@ -22,14 +22,14 @@ import (
 
 type conn struct {
 	fd         int              // file descriptor
-	lnidx      int              // listener index in the server lns list
+	sockfd     int              // socket file descriptor
 	out        []byte           // write buffer
 	sa         syscall.Sockaddr // remote socket address
 	reuse      bool             // should reuse input buffer
 	opened     bool             // connection opened event fired
 	action     Action           // next user action
 	ctx        interface{}      // user-defined context
-	addrIndex  int              // index of listening address
+	addrIndex  int				// index of listening address
 	localAddr  net.Addr         // local addre
 	remoteAddr net.Addr         // remote addr
 	loop       *loop            // connected loop
@@ -49,14 +49,12 @@ func (c *conn) Wake() {
 type server struct {
 	events   Events             // user events
 	loops    []*loop            // all the loops
-	lns      []*listener        // all the listeners
+	fdlns    map[int]*listener  // listeners map with fd as key
 	wg       sync.WaitGroup     // loop close waitgroup
 	cond     *sync.Cond         // shutdown signaler
 	balance  LoadBalance        // load balancing method
 	accepted uintptr            // accept counter
 	tch      chan time.Duration // ticker channel
-
-	//ticktm   time.Time      // next tick time
 }
 
 type loop struct {
@@ -94,10 +92,14 @@ func serve(events Events, listeners []*listener) error {
 
 	s := &server{}
 	s.events = events
-	s.lns = listeners
 	s.cond = sync.NewCond(&sync.Mutex{})
 	s.balance = events.LoadBalance
 	s.tch = make(chan time.Duration)
+	s.fdlns = make(map[int]*listener, len(listeners))
+
+	for _, ln := range listeners {
+		s.fdlns[ln.fd] = ln
+	}
 
 	//println("-- server starting")
 	if s.events.Serving != nil {
@@ -256,51 +258,47 @@ func loopTicker(s *server, l *loop) {
 }
 
 func loopAccept(s *server, l *loop, fd int) error {
-	for i, ln := range s.lns {
-		if ln.fd == fd {
-			if len(s.loops) > 1 {
-				switch s.balance {
-				case LeastConnections:
-					n := atomic.LoadInt32(&l.count)
-					for _, lp := range s.loops {
-						if lp.idx != l.idx {
-							if atomic.LoadInt32(&lp.count) < n {
-								return nil // do not accept
-							}
-						}
-					}
-				case RoundRobin:
-					idx := int(atomic.LoadUintptr(&s.accepted)) % len(s.loops)
-					if idx != l.idx {
+	ln := s.fdlns[fd]
+	if len(s.loops) > 1 {
+		switch s.balance {
+		case LeastConnections:
+			n := atomic.LoadInt32(&l.count)
+			for _, lp := range s.loops {
+				if lp.idx != l.idx {
+					if atomic.LoadInt32(&lp.count) < n {
 						return nil // do not accept
 					}
-					atomic.AddUintptr(&s.accepted, 1)
 				}
 			}
-			if ln.pconn != nil {
-				return loopUDPRead(s, l, i, fd)
+		case RoundRobin:
+			idx := int(atomic.LoadUintptr(&s.accepted)) % len(s.loops)
+			if idx != l.idx {
+				return nil // do not accept
 			}
-			nfd, sa, err := syscall.Accept(fd)
-			if err != nil {
-				if err == syscall.EAGAIN {
-					return nil
-				}
-				return err
-			}
-			if err := syscall.SetNonblock(nfd, true); err != nil {
-				return err
-			}
-			c := &conn{fd: nfd, sa: sa, lnidx: i, loop: l}
-			l.fdconns[c.fd] = c
-			l.poll.AddReadWrite(c.fd)
-			atomic.AddInt32(&l.count, 1)
-			break
+			atomic.AddUintptr(&s.accepted, 1)
 		}
 	}
+	if ln.pconn != nil {
+		return loopUDPRead(s, l, fd)
+	}
+	nfd, sa, err := syscall.Accept(fd)
+	if err != nil {
+		if err == syscall.EAGAIN {
+			return nil
+		}
+		return err
+	}
+	if err := syscall.SetNonblock(nfd, true); err != nil {
+		return err
+	}
+	c := &conn{fd: nfd, sa: sa, sockfd: fd, loop: l}
+	l.fdconns[c.fd] = c
+	l.poll.AddReadWrite(c.fd)
+	atomic.AddInt32(&l.count, 1)
 	return nil
 }
 
-func loopUDPRead(s *server, l *loop, lnidx, fd int) error {
+func loopUDPRead(s *server, l *loop, fd int) error {
 	n, sa, err := syscall.Recvfrom(fd, l.packet, 0)
 	if err != nil || n == 0 {
 		return nil
@@ -322,8 +320,7 @@ func loopUDPRead(s *server, l *loop, lnidx, fd int) error {
 			sa6 = *sa
 		}
 		c := &conn{}
-		c.addrIndex = lnidx
-		c.localAddr = s.lns[lnidx].lnaddr
+		c.localAddr = s.fdlns[fd].lnaddr
 		c.remoteAddr = internal.SockaddrToAddr(&sa6)
 		in := append([]byte{}, l.packet[:n]...)
 		out, action := s.events.Data(c, in)
@@ -343,8 +340,7 @@ func loopUDPRead(s *server, l *loop, lnidx, fd int) error {
 
 func loopOpened(s *server, l *loop, c *conn) error {
 	c.opened = true
-	c.addrIndex = c.lnidx
-	c.localAddr = s.lns[c.lnidx].lnaddr
+	c.localAddr = s.fdlns[c.sockfd].lnaddr
 	c.remoteAddr = internal.SockaddrToAddr(c.sa)
 	if s.events.Opened != nil {
 		out, opts, action := s.events.Opened(c)
@@ -354,7 +350,7 @@ func loopOpened(s *server, l *loop, c *conn) error {
 		c.action = action
 		c.reuse = opts.ReuseInputBuffer
 		if opts.TCPKeepAlive > 0 {
-			if _, ok := s.lns[c.lnidx].ln.(*net.TCPListener); ok {
+			if _, ok := s.fdlns[c.sockfd].ln.(*net.TCPListener); ok {
 				internal.SetKeepAlive(c.fd, int(opts.TCPKeepAlive/time.Second))
 			}
 		}
