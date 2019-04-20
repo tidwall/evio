@@ -179,10 +179,8 @@ func Serve(events Events, addr ...string) error {
 		} else {
 			ln.lnaddr = ln.ln.Addr()
 		}
-		if !stdlib {
-			if err := ln.system(); err != nil {
-				return err
-			}
+		if err := ln.system(); err != nil {
+			return err
 		}
 		lns = append(lns, &ln)
 	}

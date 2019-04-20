@@ -20,7 +20,7 @@ var errCloseConns = errors.New("close conns")
 type stdserver struct {
 	events   Events         // user events
 	loops    []*stdloop     // all the loops
-	lns      []*listener    // all the listeners
+	fdlns    map[int]*listener  // listeners map with fd as key
 	loopwg   sync.WaitGroup // loop close waitgroup
 	lnwg     sync.WaitGroup // listener close waitgroup
 	cond     *sync.Cond     // shutdown signaler
@@ -30,6 +30,7 @@ type stdserver struct {
 
 type stdudpconn struct {
 	addrIndex  int
+	sockfd     int              // socket file descriptor
 	localAddr  net.Addr
 	remoteAddr net.Addr
 	in         []byte
@@ -50,6 +51,7 @@ type stdloop struct {
 
 type stdconn struct {
 	addrIndex  int
+	sockfd     int              // socket file descriptor
 	localAddr  net.Addr
 	remoteAddr net.Addr
 	conn       net.Conn    // original connection
@@ -110,7 +112,12 @@ func stdserve(events Events, listeners []*listener) error {
 
 	s := &stdserver{}
 	s.events = events
-	s.lns = listeners
+
+	s.fdlns = make(map[int]*listener, len(listeners))
+	for _, ln := range listeners {
+		s.fdlns[ln.fd] = ln
+	}
+
 	s.cond = sync.NewCond(&sync.Mutex{})
 
 	//println("-- server starting")
@@ -148,8 +155,8 @@ func stdserve(events Events, listeners []*listener) error {
 		s.loopwg.Wait()
 
 		// shutdown all listeners
-		for i := 0; i < len(s.lns); i++ {
-			s.lns[i].close()
+		for _, ln := range s.fdlns {
+			ln.close()
 		}
 
 		// wait on all listeners to complete
@@ -169,12 +176,12 @@ func stdserve(events Events, listeners []*listener) error {
 	}
 	s.lnwg.Add(len(listeners))
 	for i := 0; i < len(listeners); i++ {
-		go stdlistenerRun(s, listeners[i], i)
+		go stdlistenerRun(s, listeners[i], listeners[i].fd)
 	}
 	return ferr
 }
 
-func stdlistenerRun(s *stdserver, ln *listener, lnidx int) {
+func stdlistenerRun(s *stdserver, ln *listener, fd int) {
 	var ferr error
 	defer func() {
 		s.signalShutdown(ferr)
@@ -191,7 +198,7 @@ func stdlistenerRun(s *stdserver, ln *listener, lnidx int) {
 			}
 			l := s.loops[int(atomic.AddUintptr(&s.accepted, 1))%len(s.loops)]
 			l.ch <- &stdudpconn{
-				addrIndex:  lnidx,
+				sockfd:  fd,
 				localAddr:  ln.lnaddr,
 				remoteAddr: addr,
 				in:         append([]byte{}, packet[:n]...),
@@ -204,7 +211,7 @@ func stdlistenerRun(s *stdserver, ln *listener, lnidx int) {
 				return
 			}
 			l := s.loops[int(atomic.AddUintptr(&s.accepted, 1))%len(s.loops)]
-			c := &stdconn{conn: conn, loop: l, lnidx: lnidx}
+			c := &stdconn{conn: conn, loop: l, sockfd: fd}
 			l.ch <- c
 			go func(c *stdconn) {
 				var packet [0xFFFF]byte
@@ -404,7 +411,7 @@ func stdloopReadUDP(s *stdserver, l *stdloop, c *stdudpconn) error {
 			if s.events.PreWrite != nil {
 				s.events.PreWrite()
 			}
-			s.lns[c.addrIndex].pconn.WriteTo(out, c.remoteAddr)
+			s.fdlns[c.sockfd].pconn.WriteTo(out, c.remoteAddr)
 		}
 		switch action {
 		case Shutdown:
@@ -428,8 +435,7 @@ func stdloopClose(s *stdserver, l *stdloop, c *stdconn) error {
 
 func stdloopAccept(s *stdserver, l *stdloop, c *stdconn) error {
 	l.conns[c] = true
-	c.addrIndex = c.lnidx
-	c.localAddr = s.lns[c.lnidx].lnaddr
+	c.localAddr = s.fdlns[c.sockfd].lnaddr
 	c.remoteAddr = c.conn.RemoteAddr()
 
 	if s.events.Opened != nil {
