@@ -26,6 +26,7 @@ type stdserver struct {
 	cond     *sync.Cond        // shutdown signaler
 	serr     error             // signal error
 	accepted uintptr           // accept counter
+	once     sync.Once         // make sure it only signalShutdown once
 }
 
 type stdudpconn struct {
@@ -92,10 +93,12 @@ func (s *stdserver) waitForShutdown() error {
 
 // signalShutdown signals a shutdown an begins server closing
 func (s *stdserver) signalShutdown(err error) {
-	s.cond.L.Lock()
-	s.serr = err
-	s.cond.Signal()
-	s.cond.L.Unlock()
+	s.once.Do(func() {
+		s.cond.L.Lock()
+		s.serr = err
+		s.cond.Signal()
+		s.cond.L.Unlock()
+	})
 }
 
 func stdserve(events Events, listeners []*listener) error {
