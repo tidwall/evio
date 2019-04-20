@@ -16,7 +16,7 @@ import (
 	"time"
 
 	reuseport "github.com/kavu/go_reuseport"
-	"github.com/panjf2000/evio/internal"
+	"github.com/tidwall/evio/internal"
 )
 
 type conn struct {
