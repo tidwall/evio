@@ -18,19 +18,18 @@ var errClosing = errors.New("closing")
 var errCloseConns = errors.New("close conns")
 
 type stdserver struct {
-	events   Events         // user events
-	loops    []*stdloop     // all the loops
-	fdlns    map[int]*listener  // listeners map with fd as key
-	loopwg   sync.WaitGroup // loop close waitgroup
-	lnwg     sync.WaitGroup // listener close waitgroup
-	cond     *sync.Cond     // shutdown signaler
-	serr     error          // signal error
-	accepted uintptr        // accept counter
+	events   Events            // user events
+	loops    []*stdloop        // all the loops
+	fdlns    map[int]*listener // listeners map with fd as key
+	loopwg   sync.WaitGroup    // loop close waitgroup
+	lnwg     sync.WaitGroup    // listener close waitgroup
+	cond     *sync.Cond        // shutdown signaler
+	serr     error             // signal error
+	accepted uintptr           // accept counter
 }
 
 type stdudpconn struct {
-	addrIndex  int
-	sockfd     int              // socket file descriptor
+	sockfd     int // socket file descriptor
 	localAddr  net.Addr
 	remoteAddr net.Addr
 	in         []byte
@@ -38,7 +37,6 @@ type stdudpconn struct {
 
 func (c *stdudpconn) Context() interface{}       { return nil }
 func (c *stdudpconn) SetContext(ctx interface{}) {}
-func (c *stdudpconn) AddrIndex() int             { return c.addrIndex }
 func (c *stdudpconn) LocalAddr() net.Addr        { return c.localAddr }
 func (c *stdudpconn) RemoteAddr() net.Addr       { return c.remoteAddr }
 func (c *stdudpconn) Wake()                      {}
@@ -51,7 +49,7 @@ type stdloop struct {
 
 type stdconn struct {
 	addrIndex  int
-	sockfd     int              // socket file descriptor
+	sockfd     int // socket file descriptor
 	localAddr  net.Addr
 	remoteAddr net.Addr
 	conn       net.Conn    // original connection
@@ -198,7 +196,7 @@ func stdlistenerRun(s *stdserver, ln *listener, fd int) {
 			}
 			l := s.loops[int(atomic.AddUintptr(&s.accepted, 1))%len(s.loops)]
 			l.ch <- &stdudpconn{
-				sockfd:  fd,
+				sockfd:     fd,
 				localAddr:  ln.lnaddr,
 				remoteAddr: addr,
 				in:         append([]byte{}, packet[:n]...),

@@ -55,8 +55,6 @@ type Conn interface {
 	Context() interface{}
 	// SetContext sets a user-defined context.
 	SetContext(interface{})
-	// AddrIndex is the index of server address that was passed to the Serve call.
-	AddrIndex() int
 	// LocalAddr is the connection's local socket address.
 	LocalAddr() net.Addr
 	// RemoteAddr is the connection's remote peer address.
