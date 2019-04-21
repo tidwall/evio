@@ -443,6 +443,9 @@ func loopRead(s *server, l *loop, c *conn) error {
 	}
 	if len(c.out) != 0 || c.action != None {
 		l.poll.ModReadWrite(c.fd)
+		if len(c.out) > 0 && None == c.action {
+			return loopWrite(s, l, c)
+		}
 	}
 	return nil
 }
