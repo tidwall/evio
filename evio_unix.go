@@ -54,6 +54,7 @@ type server struct {
 	balance  LoadBalance        // load balancing method
 	accepted uintptr            // accept counter
 	tch      chan time.Duration // ticker channel
+	once     sync.Once          // make sure it only signalShutdown once
 
 	//ticktm   time.Time      // next tick time
 }
@@ -75,9 +76,11 @@ func (s *server) waitForShutdown() {
 
 // signalShutdown signals a shutdown an begins server closing
 func (s *server) signalShutdown() {
-	s.cond.L.Lock()
-	s.cond.Signal()
-	s.cond.L.Unlock()
+	s.once.Do(func() {
+		s.cond.L.Lock()
+		s.cond.Signal()
+		s.cond.L.Unlock()
+	})
 }
 
 func serve(events Events, listeners []*listener) error {
