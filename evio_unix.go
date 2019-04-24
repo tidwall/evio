@@ -9,6 +9,7 @@ package evio
 import (
 	"io"
 	"net"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
