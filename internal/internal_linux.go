@@ -4,97 +4,122 @@
 
 package internal
 
-import (
-	"syscall"
-	"time"
-)
+import "syscall"
 
-func AddRead(p, fd int, readon, writeon *bool) error {
-	if readon != nil {
-		if *readon {
-			return nil
-		}
-		*readon = true
-	}
-	if writeon == nil || !*writeon {
-		return syscall.EpollCtl(p, syscall.EPOLL_CTL_ADD, fd,
-			&syscall.EpollEvent{Fd: int32(fd),
-				Events: syscall.EPOLLIN,
-			})
-	}
-	return syscall.EpollCtl(p, syscall.EPOLL_CTL_MOD, fd,
-		&syscall.EpollEvent{Fd: int32(fd),
-			Events: syscall.EPOLLIN | syscall.EPOLLOUT,
-		})
-}
-func DelRead(p, fd int, readon, writeon *bool) error {
-	if readon != nil {
-		if !*readon {
-			return nil
-		}
-		*readon = false
-	}
-	if writeon == nil || !*writeon {
-		return syscall.EpollCtl(p, syscall.EPOLL_CTL_DEL, fd,
-			&syscall.EpollEvent{Fd: int32(fd),
-				Events: syscall.EPOLLIN,
-			})
-	}
-	return syscall.EpollCtl(p, syscall.EPOLL_CTL_MOD, fd,
-		&syscall.EpollEvent{Fd: int32(fd),
-			Events: syscall.EPOLLOUT,
-		})
+// Poll ...
+type Poll struct {
+	fd    int // epoll fd
+	wfd   int // wake fd
+	notes noteQueue
 }
 
-func AddWrite(p, fd int, readon, writeon *bool) error {
-	if writeon != nil {
-		if *writeon {
-			return nil
+// OpenPoll ...
+func OpenPoll() *Poll {
+	l := new(Poll)
+	p, err := syscall.EpollCreate1(0)
+	if err != nil {
+		panic(err)
+	}
+	l.fd = p
+	r0, _, e0 := syscall.Syscall(syscall.SYS_EVENTFD2, 0, 0, 0)
+	if e0 != 0 {
+		syscall.Close(p)
+		panic(err)
+	}
+	l.wfd = int(r0)
+	l.AddRead(l.wfd)
+	return l
+}
+
+// Close ...
+func (p *Poll) Close() error {
+	if err := syscall.Close(p.wfd); err != nil {
+		return err
+	}
+	return syscall.Close(p.fd)
+}
+
+// Trigger ...
+func (p *Poll) Trigger(note interface{}) error {
+	p.notes.Add(note)
+	_, err := syscall.Write(p.wfd, []byte{0, 0, 0, 0, 0, 0, 0, 1})
+	return err
+}
+
+// Wait ...
+func (p *Poll) Wait(iter func(fd int, note interface{}) error) error {
+	events := make([]syscall.EpollEvent, 64)
+	for {
+		n, err := syscall.EpollWait(p.fd, events, -1)
+		if err != nil && err != syscall.EINTR {
+			return err
 		}
-		*writeon = true
+		if err := p.notes.ForEach(func(note interface{}) error {
+			return iter(0, note)
+		}); err != nil {
+			return err
+		}
+		for i := 0; i < n; i++ {
+			if fd := int(events[i].Fd); fd != p.wfd {
+				if err := iter(fd, nil); err != nil {
+					return err
+				}
+			}
+		}
 	}
-	if readon == nil || !*readon {
-		return syscall.EpollCtl(p, syscall.EPOLL_CTL_ADD, fd,
-			&syscall.EpollEvent{Fd: int32(fd),
-				Events: syscall.EPOLLOUT,
-			})
-	}
-	return syscall.EpollCtl(p, syscall.EPOLL_CTL_MOD, fd,
+}
+
+// AddReadWrite ...
+func (p *Poll) AddReadWrite(fd int) {
+	if err := syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_ADD, fd,
 		&syscall.EpollEvent{Fd: int32(fd),
 			Events: syscall.EPOLLIN | syscall.EPOLLOUT,
-		})
+		},
+	); err != nil {
+		panic(err)
+	}
 }
-func DelWrite(p, fd int, readon, writeon *bool) error {
-	if writeon != nil {
-		if !*writeon {
-			return nil
-		}
-		*writeon = false
-	}
-	if readon == nil || !*readon {
-		return syscall.EpollCtl(p, syscall.EPOLL_CTL_DEL, fd,
-			&syscall.EpollEvent{Fd: int32(fd),
-				Events: syscall.EPOLLOUT,
-			})
-	}
-	return syscall.EpollCtl(p, syscall.EPOLL_CTL_MOD, fd,
+
+// AddRead ...
+func (p *Poll) AddRead(fd int) {
+	if err := syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_ADD, fd,
 		&syscall.EpollEvent{Fd: int32(fd),
 			Events: syscall.EPOLLIN,
-		})
-}
-func MakePoll() (p int, err error) {
-	return syscall.EpollCreate1(0)
-}
-func MakeEvents(n int) interface{} {
-	return make([]syscall.EpollEvent, n)
-}
-func Wait(p int, evs interface{}, timeout time.Duration) (n int, err error) {
-	if timeout < 0 {
-		timeout = 0
+		},
+	); err != nil {
+		panic(err)
 	}
-	ts := int(timeout / time.Millisecond)
-	return syscall.EpollWait(p, evs.([]syscall.EpollEvent), ts)
 }
-func GetFD(evs interface{}, i int) int {
-	return int(evs.([]syscall.EpollEvent)[i].Fd)
+
+// ModRead ...
+func (p *Poll) ModRead(fd int) {
+	if err := syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_MOD, fd,
+		&syscall.EpollEvent{Fd: int32(fd),
+			Events: syscall.EPOLLIN,
+		},
+	); err != nil {
+		panic(err)
+	}
+}
+
+// ModReadWrite ...
+func (p *Poll) ModReadWrite(fd int) {
+	if err := syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_MOD, fd,
+		&syscall.EpollEvent{Fd: int32(fd),
+			Events: syscall.EPOLLIN | syscall.EPOLLOUT,
+		},
+	); err != nil {
+		panic(err)
+	}
+}
+
+// ModDetach ...
+func (p *Poll) ModDetach(fd int) {
+	if err := syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_DEL, fd,
+		&syscall.EpollEvent{Fd: int32(fd),
+			Events: syscall.EPOLLIN | syscall.EPOLLOUT,
+		},
+	); err != nil {
+		panic(err)
+	}
 }

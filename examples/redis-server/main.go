@@ -8,84 +8,72 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
-	"time"
+	"sync"
 
-	"github.com/tidwall/evio"
+	"evio"
+
 	"github.com/tidwall/redcon"
 )
 
 type conn struct {
 	is   evio.InputStream
 	addr string
-	wget bool
 }
 
 func main() {
 	var port int
 	var unixsocket string
 	var stdlib bool
+	var loops int
+	var balance string
 	flag.IntVar(&port, "port", 6380, "server port")
+	flag.IntVar(&loops, "loops", 0, "num loops")
 	flag.StringVar(&unixsocket, "unixsocket", "socket", "unix socket")
+	flag.StringVar(&balance, "balance", "random", "random, round-robin, least-connections")
 	flag.BoolVar(&stdlib, "stdlib", false, "use stdlib")
 	flag.Parse()
 
-	var srv evio.Server
-	var conns = make(map[int]*conn)
+	var mu sync.RWMutex
 	var keys = make(map[string]string)
 	var events evio.Events
-	events.Serving = func(srvin evio.Server) (action evio.Action) {
-		srv = srvin
-		log.Printf("redis server started on port %d", port)
+	switch balance {
+	default:
+		log.Fatalf("invalid -balance flag: '%v'", balance)
+	case "random":
+		events.LoadBalance = evio.Random
+	case "round-robin":
+		events.LoadBalance = evio.RoundRobin
+	case "least-connections":
+		events.LoadBalance = evio.LeastConnections
+	}
+	events.NumLoops = loops
+	events.Serving = func(srv evio.Server) (action evio.Action) {
+		log.Printf("redis server started on port %d (loops: %d)", port, srv.NumLoops)
 		if unixsocket != "" {
-			log.Printf("redis server started at %s", unixsocket)
+			log.Printf("redis server started at %s (loops: %d)", unixsocket, srv.NumLoops)
 		}
 		if stdlib {
 			log.Printf("stdlib")
 		}
 		return
 	}
-	wgetids := make(map[int]time.Time)
-	events.Opened = func(id int, info evio.Info) (out []byte, opts evio.Options, action evio.Action) {
-		c := &conn{}
-		if !wgetids[id].IsZero() {
-			delete(wgetids, id)
-			c.wget = true
-		}
-		conns[id] = c
-		if c.wget {
-			log.Printf("opened: %d, wget: %t, laddr: %v, laddr: %v", id, c.wget, info.LocalAddr, info.RemoteAddr)
-		}
-		if c.wget {
-			out = []byte("GET / HTTP/1.0\r\n\r\n")
-		}
+	events.Opened = func(ec evio.Conn) (out []byte, opts evio.Options, action evio.Action) {
+		//fmt.Printf("opened: %v\n", ec.RemoteAddr())
+		ec.SetContext(&conn{})
 		return
 	}
-	events.Tick = func() (delay time.Duration, action evio.Action) {
-		now := time.Now()
-		for id, t := range wgetids {
-			if now.Sub(t) > time.Second {
-				srv.Wake(id)
-			}
-		}
-		delay = time.Second
+	events.Closed = func(ec evio.Conn, err error) (action evio.Action) {
+		// fmt.Printf("closed: %v\n", ec.RemoteAddr())
 		return
 	}
-	events.Closed = func(id int, err error) (action evio.Action) {
-		c := conns[id]
-		if c.wget {
-			fmt.Printf("closed %d %v\n", id, err)
+
+	events.Data = func(ec evio.Conn, in []byte) (out []byte, action evio.Action) {
+		if in == nil {
+			log.Printf("wake from %s\n", ec.RemoteAddr())
+			return nil, evio.Close
 		}
-		delete(conns, id)
-		return
-	}
-	events.Data = func(id int, in []byte) (out []byte, action evio.Action) {
-		c := conns[id]
-		if c.wget {
-			print(string(in))
-			return
-		}
+		c := ec.Context().(*conn)
 		data := c.is.Begin(in)
 		var n int
 		var complete bool
@@ -106,19 +94,6 @@ func main() {
 				switch strings.ToUpper(string(args[0])) {
 				default:
 					out = redcon.AppendError(out, "ERR unknown command '"+string(args[0])+"'")
-				case "WGET":
-					if len(args) != 3 {
-						out = redcon.AppendError(out, "ERR wrong number of arguments for '"+string(args[0])+"' command")
-					} else {
-						n, _ := strconv.ParseInt(string(args[2]), 10, 63)
-						cid := srv.Dial("tcp://"+string(args[1]), time.Duration(n)*time.Second)
-						if cid == 0 {
-							out = redcon.AppendError(out, "failed to dial")
-						} else {
-							wgetids[cid] = time.Now()
-							out = redcon.AppendOK(out)
-						}
-					}
 				case "PING":
 					if len(args) > 2 {
 						out = redcon.AppendError(out, "ERR wrong number of arguments for '"+string(args[0])+"' command")
@@ -136,7 +111,6 @@ func main() {
 				case "SHUTDOWN":
 					out = redcon.AppendString(out, "OK")
 					action = evio.Shutdown
-
 				case "QUIT":
 					out = redcon.AppendString(out, "OK")
 					action = evio.Close
@@ -144,7 +118,10 @@ func main() {
 					if len(args) != 2 {
 						out = redcon.AppendError(out, "ERR wrong number of arguments for '"+string(args[0])+"' command")
 					} else {
-						val, ok := keys[string(args[1])]
+						key := string(args[1])
+						mu.Lock()
+						val, ok := keys[key]
+						mu.Unlock()
 						if !ok {
 							out = redcon.AppendNull(out)
 						} else {
@@ -155,7 +132,10 @@ func main() {
 					if len(args) != 3 {
 						out = redcon.AppendError(out, "ERR wrong number of arguments for '"+string(args[0])+"' command")
 					} else {
-						keys[string(args[1])] = string(args[2])
+						key, val := string(args[1]), string(args[2])
+						mu.Lock()
+						keys[key] = val
+						mu.Unlock()
 						out = redcon.AppendString(out, "OK")
 					}
 				case "DEL":
@@ -163,16 +143,20 @@ func main() {
 						out = redcon.AppendError(out, "ERR wrong number of arguments for '"+string(args[0])+"' command")
 					} else {
 						var n int
+						mu.Lock()
 						for i := 1; i < len(args); i++ {
-							if _, ok := keys[string(args[1])]; ok {
+							if _, ok := keys[string(args[i])]; ok {
 								n++
-								delete(keys, string(args[1]))
+								delete(keys, string(args[i]))
 							}
 						}
+						mu.Unlock()
 						out = redcon.AppendInt(out, int64(n))
 					}
 				case "FLUSHDB":
+					mu.Lock()
 					keys = make(map[string]string)
+					mu.Unlock()
 					out = redcon.AppendString(out, "OK")
 				}
 			}
@@ -184,11 +168,8 @@ func main() {
 	if stdlib {
 		ssuf = "-net"
 	}
-	addrs := []string{fmt.Sprintf("tcp"+ssuf+"://:%d", port)}
-	if unixsocket != "" {
-		addrs = append(addrs, fmt.Sprintf("unix"+ssuf+"://%s", unixsocket))
-	}
-	err := evio.Serve(events, addrs...)
+	addr := fmt.Sprintf("tcp"+ssuf+"://:%d", port)
+	err := evio.Serve(addr, events)
 	if err != nil {
 		log.Fatal(err)
 	}
