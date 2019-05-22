@@ -7,7 +7,6 @@
 package evio
 
 import (
-	"io"
 	"net"
 	"os"
 	"runtime"
@@ -163,25 +162,6 @@ func loopCloseConn(s *server, l *loop, c *conn, err error) error {
 	return nil
 }
 
-func loopDetachConn(s *server, l *loop, c *conn, err error) error {
-	if s.events.Detached == nil {
-		return loopCloseConn(s, l, c, err)
-	}
-	l.poll.ModDetach(c.fd)
-
-	atomic.AddInt32(&l.count, -1)
-	delete(l.fdconns, c.fd)
-	if err := syscall.SetNonblock(c.fd, false); err != nil {
-		return err
-	}
-	switch s.events.Detached(c, &detachedConn{fd: c.fd}) {
-	case None:
-	case Shutdown:
-		return errClosing
-	}
-	return nil
-}
-
 func loopNote(s *server, l *loop, note interface{}) error {
 	var err error
 	switch v := note.(type) {
@@ -314,9 +294,6 @@ func loopOpened(s *server, l *loop, c *conn) error {
 }
 
 func loopWrite(s *server, l *loop, c *conn) error {
-	if s.events.PreWrite != nil {
-		s.events.PreWrite()
-	}
 	c.lock.Lock()
 	n, err := syscall.Write(c.fd, c.out)
 	if err != nil {
@@ -349,8 +326,6 @@ func loopAction(s *server, l *loop, c *conn) error {
 		return loopCloseConn(s, l, c, nil)
 	case Shutdown:
 		return errClosing
-	case Detach:
-		return loopDetachConn(s, l, c, nil)
 	}
 
 	c.lock.Lock()
@@ -393,45 +368,6 @@ func loopRead(s *server, l *loop, c *conn) error {
 	}
 
 	return nil
-}
-
-type detachedConn struct {
-	fd int
-}
-
-func (c *detachedConn) Close() error {
-	err := syscall.Close(c.fd)
-	if err != nil {
-		return err
-	}
-	c.fd = -1
-	return nil
-}
-
-func (c *detachedConn) Read(p []byte) (n int, err error) {
-	n, err = syscall.Read(c.fd, p)
-	if err != nil {
-		return n, err
-	}
-	if n == 0 {
-		if len(p) == 0 {
-			return 0, nil
-		}
-		return 0, io.EOF
-	}
-	return n, nil
-}
-
-func (c *detachedConn) Write(p []byte) (n int, err error) {
-	n = len(p)
-	for len(p) > 0 {
-		nn, err := syscall.Write(c.fd, p)
-		if err != nil {
-			return n, err
-		}
-		p = p[nn:]
-	}
-	return n, nil
 }
 
 func (ln *listener) close() {

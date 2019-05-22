@@ -41,7 +41,7 @@ type stdconn struct {
 	ctx        interface{} // user-defined context
 	loop       *stdloop    // owner loop
 	donein     []byte      // extra data for done connection
-	done       int32       // 0: attached, 1: closed, 2: detached
+	done       int32       // 0: attached, 1: closed
 }
 
 func (c *stdconn) Context() interface{}       { return c.ctx }
@@ -268,17 +268,6 @@ func stdloopError(s *stdserver, l *stdloop, c *stdconn, err error) error {
 	case 1: // closed
 		c.conn.Close()
 		err = nil
-	case 2: // detached
-		err = nil
-		if s.events.Detached == nil {
-			c.conn.Close()
-		} else {
-			closeEvent = false
-			switch s.events.Detached(c, &stddetachedConn{c.conn, c.donein}) {
-			case Shutdown:
-				return errClosing
-			}
-		}
 	}
 	if closeEvent {
 		if s.events.Closed != nil {
@@ -291,35 +280,6 @@ func stdloopError(s *stdserver, l *stdloop, c *stdconn, err error) error {
 	return nil
 }
 
-type stddetachedConn struct {
-	conn net.Conn // original conn
-	in   []byte   // extra input data
-}
-
-func (c *stddetachedConn) Read(p []byte) (n int, err error) {
-	if len(c.in) > 0 {
-		if len(c.in) <= len(p) {
-			copy(p, c.in)
-			n = len(c.in)
-			c.in = nil
-			return
-		}
-		copy(p, c.in[:len(p)])
-		n = len(p)
-		c.in = c.in[n:]
-		return
-	}
-	return c.conn.Read(p)
-}
-
-func (c *stddetachedConn) Write(p []byte) (n int, err error) {
-	return c.conn.Write(p)
-}
-
-func (c *stddetachedConn) Close() error {
-	return c.conn.Close()
-}
-
 func stdloopRead(s *stdserver, l *stdloop, c *stdconn, in []byte) error {
 	if atomic.LoadInt32(&c.done) == 2 {
 		// should not ignore reads for detached connections
@@ -329,26 +289,15 @@ func stdloopRead(s *stdserver, l *stdloop, c *stdconn, in []byte) error {
 	if s.events.Data != nil {
 		out, action := s.events.Data(c, in)
 		if len(out) > 0 {
-			if s.events.PreWrite != nil {
-				s.events.PreWrite()
-			}
 			c.conn.Write(out)
 		}
 		switch action {
 		case Shutdown:
 			return errClosing
-		case Detach:
-			return stdloopDetach(s, l, c)
 		case Close:
 			return stdloopClose(s, l, c)
 		}
 	}
-	return nil
-}
-
-func stdloopDetach(s *stdserver, l *stdloop, c *stdconn) error {
-	atomic.StoreInt32(&c.done, 2)
-	c.conn.SetReadDeadline(time.Now())
 	return nil
 }
 
@@ -366,9 +315,6 @@ func stdloopAccept(s *stdserver, l *stdloop, c *stdconn) error {
 	if s.events.Opened != nil {
 		out, opts, action := s.events.Opened(c)
 		if len(out) > 0 {
-			if s.events.PreWrite != nil {
-				s.events.PreWrite()
-			}
 			c.conn.Write(out)
 		}
 		if opts.TCPKeepAlive > 0 {
@@ -380,8 +326,6 @@ func stdloopAccept(s *stdserver, l *stdloop, c *stdconn) error {
 		switch action {
 		case Shutdown:
 			return errClosing
-		case Detach:
-			return stdloopDetach(s, l, c)
 		case Close:
 			return stdloopClose(s, l, c)
 		}
