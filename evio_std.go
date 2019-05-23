@@ -94,7 +94,6 @@ func stdserve(events Events, listener *listener) error {
 	s.ln = listener
 	s.cond = sync.NewCond(&sync.Mutex{})
 
-	//println("-- server starting")
 	if events.Serving != nil {
 		var svr Server
 		svr.NumLoops = numLoops

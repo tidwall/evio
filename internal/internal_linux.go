@@ -6,11 +6,17 @@ package internal
 
 import "syscall"
 
+const (
+	EventClose uint64 = 1
+	EventTick  uint64 = 2
+	EventWrite uint64 = 3
+)
+
 // Poll ...
 type Poll struct {
-	fd    int // epoll fd
-	wfd   int // wake fd
-	notes noteQueue
+	fd      int // epoll fd
+	eventFd *EventFd
+	notes   noteQueue
 }
 
 // OpenPoll ...
@@ -21,29 +27,32 @@ func OpenPoll() *Poll {
 		panic(err)
 	}
 	l.fd = p
-	r0, _, e0 := syscall.Syscall(syscall.SYS_EVENTFD2, 0, syscall.O_CLOEXEC, 0)
-	if e0 != 0 {
-		syscall.Close(p)
+	eventFd, err := newEventFd()
+	if err != nil {
 		panic(err)
 	}
-	l.wfd = int(r0)
-	l.AddRead(l.wfd)
+	l.eventFd = eventFd
+	l.AddRead(l.eventFd.Fd())
 	return l
 }
 
 // Close ...
 func (p *Poll) Close() error {
-	if err := syscall.Close(p.wfd); err != nil {
+	if err := p.eventFd.Close(); err != nil {
 		return err
 	}
+
 	return syscall.Close(p.fd)
+}
+
+func (p *Poll) FireEvent(event uint64) error {
+	return p.eventFd.WriteEvent(event)
 }
 
 // Trigger ...
 func (p *Poll) Trigger(note interface{}) error {
 	p.notes.Add(note)
-	_, err := syscall.Write(p.wfd, []byte{0, 0, 0, 0, 0, 0, 0, 1})
-	return err
+	return p.eventFd.WriteEvent(1)
 }
 
 // Wait ...
@@ -60,7 +69,19 @@ func (p *Poll) Wait(iter func(fd int, note interface{}) error) error {
 			return err
 		}
 		for i := 0; i < n; i++ {
-			if fd := int(events[i].Fd); fd != p.wfd {
+			if fd := int(events[i].Fd); fd == p.eventFd.Fd() {
+				event, err := p.eventFd.ReadEvent()
+				if err != nil {
+					return err
+				}
+
+				switch event {
+				case EventClose:
+					return nil
+				case EventTick:
+				case EventWrite:
+				}
+			} else {
 				if err := iter(fd, nil); err != nil {
 					return err
 				}
@@ -122,4 +143,14 @@ func (p *Poll) ModDetach(fd int) {
 	); err != nil {
 		panic(err)
 	}
+}
+
+func SetKeepAlive(fd, secs int) error {
+	if err := syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_KEEPALIVE, 1); err != nil {
+		return err
+	}
+	if err := syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, secs); err != nil {
+		return err
+	}
+	return syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_KEEPIDLE, secs)
 }

@@ -2,7 +2,7 @@
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
-// +build !darwin,!netbsd,!freebsd,!openbsd,!dragonfly,!linux
+// +build !linux
 
 package evio
 
@@ -16,9 +16,6 @@ func (ln *listener) close() {
 	if ln.ln != nil {
 		ln.ln.Close()
 	}
-	if ln.pconn != nil {
-		ln.pconn.Close()
-	}
 	if ln.network == "unix" {
 		os.RemoveAll(ln.addr)
 	}
@@ -28,8 +25,8 @@ func (ln *listener) system() error {
 	return nil
 }
 
-func serve(events Events, listeners []*listener) error {
-	return stdserve(events, listeners)
+func serve(events Events, listener *listener) error {
+	return stdserve(events, listener)
 }
 
 func reuseportListenPacket(proto, addr string) (l net.PacketConn, err error) {

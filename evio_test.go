@@ -2,6 +2,8 @@
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
+// +build linux
+
 package evio
 
 import (
@@ -361,7 +363,6 @@ func TestReuseInputBuffer(t *testing.T) {
 		}
 		must(Serve("tcp://:19991", events))
 	}
-
 }
 
 func TestReuseport(t *testing.T) {
