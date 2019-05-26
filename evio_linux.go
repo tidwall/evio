@@ -36,7 +36,26 @@ func (c *conn) Context() interface{}       { return c.ctx }
 func (c *conn) SetContext(ctx interface{}) { c.ctx = ctx }
 func (c *conn) LocalAddr() net.Addr        { return c.localAddr }
 func (c *conn) RemoteAddr() net.Addr       { return c.remoteAddr }
-func (c *conn) Write(data []byte) {
+
+func (c *conn) Write(data []byte) error {
+	n, err := syscall.Write(c.fd, data)
+	if err != nil {
+		if err == syscall.EAGAIN {
+			c.willWrite(data)
+			return nil
+		}
+
+		return err
+	}
+
+	if n < len(data) {
+		c.willWrite(data[n:])
+	}
+
+	return nil
+}
+
+func (c *conn) willWrite(data []byte) {
 	c.lock.Lock()
 	c.out = append(c.out, data...)
 	c.lock.Unlock()
@@ -160,23 +179,6 @@ func loopCloseConn(s *server, l *loop, c *conn, err error) error {
 	return nil
 }
 
-func loopNote(s *server, l *loop, note interface{}) error {
-	var err error
-	switch v := note.(type) {
-	case time.Duration:
-		delay, action := s.events.Tick()
-		switch action {
-		case None:
-		case Shutdown:
-			err = errClosing
-		}
-		s.tch <- delay
-	case error: // shutdown
-		err = v
-	}
-	return err
-}
-
 func loopRun(s *server, l *loop) {
 	defer func() {
 		s.signalShutdown()
@@ -187,29 +189,9 @@ func loopRun(s *server, l *loop) {
 		go loopTicker(s, l)
 	}
 
-	l.poll.Wait(func(fd int, note interface{}) error {
-		if fd == 0 {
-			return loopNote(s, l, note)
-		}
-
-		c := l.fdconns[fd]
-		if c == nil {
-			return loopAccept(s, l)
-		}
-
-		c.lock.Lock()
-		empty := len(c.out) == 0
-		c.lock.Unlock()
-		switch {
-		case !c.opened:
-			return loopOpened(s, l, c)
-		case !empty:
-			return loopWrite(s, l, c)
-		case c.action != None:
-			return loopAction(s, l, c)
-		default:
-			return loopRead(s, l, c)
-		}
+	l.poll.Wait(eventHandler{
+		s: s,
+		l: l,
 	})
 }
 
@@ -269,14 +251,16 @@ func loopOpened(s *server, l *loop, c *conn) error {
 		out, opts, action := s.events.Opened(c)
 		if len(out) > 0 {
 			c.lock.Lock()
-			c.out = append([]byte{}, out...)
+			c.out = append([]byte(nil), out...)
 			c.lock.Unlock()
 		}
 		c.action = action
 		c.reuse = opts.ReuseInputBuffer
 		if opts.TCPKeepAlive > 0 {
 			if _, ok := s.ln.ln.(*net.TCPListener); ok {
-				internal.SetKeepAlive(c.fd, int(opts.TCPKeepAlive/time.Second))
+				if err := internal.SetKeepAlive(c.fd, int(opts.TCPKeepAlive/time.Second)); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -399,6 +383,49 @@ func (ln *listener) system() error {
 	}
 	ln.fd = int(ln.f.Fd())
 	return syscall.SetNonblock(ln.fd, true)
+}
+
+type eventHandler struct {
+	s *server
+	l *loop
+}
+
+func (h eventHandler) OnEvent(event uint64) error {
+	switch event {
+	case internal.EventClose:
+		return errClosing
+	case internal.EventTick:
+		delay, action := h.s.events.Tick()
+		switch action {
+		case None:
+		case Shutdown:
+			return errClosing
+		}
+		h.s.tch <- delay
+	}
+
+	return nil
+}
+
+func (h eventHandler) OnFdEvent(fd int) error {
+	c := h.l.fdconns[fd]
+	if c == nil {
+		return loopAccept(h.s, h.l)
+	}
+
+	c.lock.Lock()
+	empty := len(c.out) == 0
+	c.lock.Unlock()
+	switch {
+	case !c.opened:
+		return loopOpened(h.s, h.l, c)
+	case !empty:
+		return loopWrite(h.s, h.l, c)
+	case c.action != None:
+		return loopAction(h.s, h.l, c)
+	default:
+		return loopRead(h.s, h.l, c)
+	}
 }
 
 func reuseportListen(proto, addr string) (l net.Listener, err error) {

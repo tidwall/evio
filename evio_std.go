@@ -48,8 +48,9 @@ func (c *stdconn) Context() interface{}       { return c.ctx }
 func (c *stdconn) SetContext(ctx interface{}) { c.ctx = ctx }
 func (c *stdconn) LocalAddr() net.Addr        { return c.localAddr }
 func (c *stdconn) RemoteAddr() net.Addr       { return c.remoteAddr }
-func (c *stdconn) Write(data []byte) {
-	c.conn.Write(data)
+func (c *stdconn) Write(data []byte) error {
+	_, err := c.conn.Write(data)
+	return err
 }
 
 type stdin struct {

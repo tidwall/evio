@@ -56,7 +56,7 @@ type Conn interface {
 	// RemoteAddr is the connection's remote peer address.
 	RemoteAddr() net.Addr
 	// Write writes the data to the remote, async write, no error returned immedidately.
-	Write(data []byte)
+	Write(data []byte) error
 }
 
 // LoadBalance sets the load balancing method.

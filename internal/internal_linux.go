@@ -12,12 +12,19 @@ const (
 	EventWrite uint64 = 3
 )
 
-// Poll ...
-type Poll struct {
-	fd      int // epoll fd
-	eventFd *EventFd
-	notes   noteQueue
-}
+type (
+	EventHandler interface {
+		OnEvent(event uint64) error
+		OnFdEvent(fd int) error
+	}
+
+	// Poll ...
+	Poll struct {
+		fd      int // epoll fd
+		eventFd *EventFd
+		notes   noteQueue
+	}
+)
 
 // OpenPoll ...
 func OpenPoll() *Poll {
@@ -56,35 +63,23 @@ func (p *Poll) Trigger(note interface{}) error {
 }
 
 // Wait ...
-func (p *Poll) Wait(iter func(fd int, note interface{}) error) error {
+func (p *Poll) Wait(handler EventHandler) error {
 	events := make([]syscall.EpollEvent, 64)
 	for {
 		n, err := syscall.EpollWait(p.fd, events, -1)
 		if err != nil && err != syscall.EINTR {
 			return err
 		}
-		if err := p.notes.ForEach(func(note interface{}) error {
-			return iter(0, note)
-		}); err != nil {
-			return err
-		}
+
 		for i := 0; i < n; i++ {
 			if fd := int(events[i].Fd); fd == p.eventFd.Fd() {
-				event, err := p.eventFd.ReadEvent()
-				if err != nil {
+				if event, err := p.eventFd.ReadEvent(); err != nil {
+					return err
+				} else if err := handler.OnEvent(event); err != nil {
 					return err
 				}
-
-				switch event {
-				case EventClose:
-					return nil
-				case EventTick:
-				case EventWrite:
-				}
-			} else {
-				if err := iter(fd, nil); err != nil {
-					return err
-				}
+			} else if err := handler.OnFdEvent(fd); err != nil {
+				return err
 			}
 		}
 	}
