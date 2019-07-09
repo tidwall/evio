@@ -174,7 +174,7 @@ func main() {
 	if unixsocket != "" {
 		addrs = append(addrs, fmt.Sprintf("unix"+ssuf+"://%s", unixsocket))
 	}
-	err := evio.Serve(events, addrs...)
+	err := evio.Serve(events, 0, addrs...)
 	if err != nil {
 		log.Fatal(err)
 	}

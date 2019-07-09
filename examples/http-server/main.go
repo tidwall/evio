@@ -118,7 +118,7 @@ func main() {
 		addrs = append(addrs, fmt.Sprintf("unix"+ssuf+"://%s", unixsocket))
 	}
 	// Start serving!
-	log.Fatal(evio.Serve(events, addrs...))
+	log.Fatal(evio.Serve(events, 0, addrs...))
 }
 
 // appendhandle handles the incoming request and appends the response to
