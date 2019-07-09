@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/RussellLuo/timingwheel"
 	reuseport "github.com/kavu/go_reuseport"
 	"github.com/tidwall/evio/internal"
 )
@@ -27,12 +28,14 @@ type conn struct {
 	sa         syscall.Sockaddr // remote socket address
 	reuse      bool             // should reuse input buffer
 	opened     bool             // connection opened event fired
-	action     Action           // next user action
-	ctx        interface{}      // user-defined context
-	addrIndex  int              // index of listening address
-	localAddr  net.Addr         // local addre
-	remoteAddr net.Addr         // remote addr
-	loop       *loop            // connected loop
+	closed     bool
+	action     Action      // next user action
+	ctx        interface{} // user-defined context
+	addrIndex  int         // index of listening address
+	localAddr  net.Addr    // local addre
+	remoteAddr net.Addr    // remote addr
+	activeTime int64       // Last received message time
+	loop       *loop       // connected loop
 }
 
 func (c *conn) Context() interface{}       { return c.ctx }
@@ -40,6 +43,8 @@ func (c *conn) SetContext(ctx interface{}) { c.ctx = ctx }
 func (c *conn) AddrIndex() int             { return c.addrIndex }
 func (c *conn) LocalAddr() net.Addr        { return c.localAddr }
 func (c *conn) RemoteAddr() net.Addr       { return c.remoteAddr }
+func (c *conn) SetActiveTime(t time.Time)  { atomic.SwapInt64(&c.activeTime, t.Unix()) }
+func (c *conn) ActiveTime() time.Time      { return time.Unix(atomic.LoadInt64(&c.activeTime), 0) }
 func (c *conn) Wake() {
 	if c.loop != nil {
 		c.loop.poll.Trigger(c)
@@ -47,14 +52,15 @@ func (c *conn) Wake() {
 }
 
 type server struct {
-	events   Events             // user events
-	loops    []*loop            // all the loops
-	lns      []*listener        // all the listeners
-	wg       sync.WaitGroup     // loop close waitgroup
-	cond     *sync.Cond         // shutdown signaler
-	balance  LoadBalance        // load balancing method
-	accepted uintptr            // accept counter
-	tch      chan time.Duration // ticker channel
+	events      Events             // user events
+	loops       []*loop            // all the loops
+	lns         []*listener        // all the listeners
+	wg          sync.WaitGroup     // loop close waitgroup
+	cond        *sync.Cond         // shutdown signaler
+	balance     LoadBalance        // load balancing method
+	accepted    uintptr            // accept counter
+	tch         chan time.Duration // ticker channel
+	waitTimeout time.Duration
 
 	//ticktm   time.Time      // next tick time
 }
@@ -65,6 +71,7 @@ type loop struct {
 	packet  []byte         // read packet buffer
 	fdconns map[int]*conn  // loop connections fd -> conn
 	count   int32          // connection count
+	tw      *timingwheel.TimingWheel
 }
 
 // waitForShutdown waits for a signal to shutdown
@@ -81,7 +88,7 @@ func (s *server) signalShutdown() {
 	s.cond.L.Unlock()
 }
 
-func serve(events Events, listeners []*listener) error {
+func serve(events Events, waitTimeout time.Duration, listeners []*listener) error {
 	// figure out the correct number of loops/goroutines to use.
 	numLoops := events.NumLoops
 	if numLoops <= 0 {
@@ -98,6 +105,7 @@ func serve(events Events, listeners []*listener) error {
 	s.cond = sync.NewCond(&sync.Mutex{})
 	s.balance = events.LoadBalance
 	s.tch = make(chan time.Duration)
+	s.waitTimeout = waitTimeout
 
 	//println("-- server starting")
 	if s.events.Serving != nil {
@@ -133,6 +141,7 @@ func serve(events Events, listeners []*listener) error {
 				loopCloseConn(s, l, c, nil)
 			}
 			l.poll.Close()
+			l.tw.Stop()
 		}
 		//println("-- server stopped")
 	}()
@@ -144,7 +153,9 @@ func serve(events Events, listeners []*listener) error {
 			poll:    internal.OpenPoll(),
 			packet:  make([]byte, 0xFFFF),
 			fdconns: make(map[int]*conn),
+			tw:      timingwheel.NewTimingWheel(time.Second, 60),
 		}
+		l.tw.Start()
 		for _, ln := range listeners {
 			l.poll.AddRead(ln.fd)
 		}
@@ -158,6 +169,22 @@ func serve(events Events, listeners []*listener) error {
 	return nil
 }
 
+func closeTimeoutConn(s *server, l *loop, c *conn) func() {
+	return func() {
+		if c.closed {
+			return
+		}
+
+		now := time.Now()
+		intervals := now.Sub(c.ActiveTime())
+		if intervals >= s.waitTimeout {
+			loopCloseConn(s, l, c, nil)
+		} else {
+			l.tw.AfterFunc(s.waitTimeout-intervals, closeTimeoutConn(s, l, c))
+		}
+	}
+}
+
 func loopCloseConn(s *server, l *loop, c *conn, err error) error {
 	atomic.AddInt32(&l.count, -1)
 	delete(l.fdconns, c.fd)
@@ -169,6 +196,7 @@ func loopCloseConn(s *server, l *loop, c *conn, err error) error {
 			return errClosing
 		}
 	}
+	c.closed = true
 	return nil
 }
 
@@ -291,9 +319,15 @@ func loopAccept(s *server, l *loop, fd int) error {
 				return err
 			}
 			c := &conn{fd: nfd, sa: sa, lnidx: i, loop: l}
+			c.SetActiveTime(time.Now())
 			l.fdconns[c.fd] = c
 			l.poll.AddReadWrite(c.fd)
 			atomic.AddInt32(&l.count, 1)
+
+			if s.waitTimeout > 0 {
+				l.tw.AfterFunc(s.waitTimeout, closeTimeoutConn(s, l, c))
+			}
+
 			break
 		}
 	}
@@ -428,6 +462,9 @@ func loopRead(s *server, l *loop, c *conn) error {
 		}
 		return loopCloseConn(s, l, c, err)
 	}
+
+	c.SetActiveTime(time.Now())
+
 	in = l.packet[:n]
 	if !c.reuse {
 		in = append([]byte{}, in...)

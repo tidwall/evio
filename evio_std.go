@@ -12,20 +12,23 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/RussellLuo/timingwheel"
 )
 
 var errClosing = errors.New("closing")
 var errCloseConns = errors.New("close conns")
 
 type stdserver struct {
-	events   Events         // user events
-	loops    []*stdloop     // all the loops
-	lns      []*listener    // all the listeners
-	loopwg   sync.WaitGroup // loop close waitgroup
-	lnwg     sync.WaitGroup // listener close waitgroup
-	cond     *sync.Cond     // shutdown signaler
-	serr     error          // signal error
-	accepted uintptr        // accept counter
+	events      Events         // user events
+	loops       []*stdloop     // all the loops
+	lns         []*listener    // all the listeners
+	loopwg      sync.WaitGroup // loop close waitgroup
+	lnwg        sync.WaitGroup // listener close waitgroup
+	cond        *sync.Cond     // shutdown signaler
+	serr        error          // signal error
+	accepted    uintptr        // accept counter
+	waitTimeout time.Duration
 }
 
 type stdudpconn struct {
@@ -46,6 +49,7 @@ type stdloop struct {
 	idx   int               // loop index
 	ch    chan interface{}  // command channel
 	conns map[*stdconn]bool // track all the conns bound to this loop
+	tw    *timingwheel.TimingWheel
 }
 
 type stdconn struct {
@@ -58,6 +62,8 @@ type stdconn struct {
 	lnidx      int         // index of listener
 	donein     []byte      // extra data for done connection
 	done       int32       // 0: attached, 1: closed, 2: detached
+	activeTime int64       // Last received message time
+	closed     bool
 }
 
 type wakeReq struct {
@@ -70,6 +76,8 @@ func (c *stdconn) AddrIndex() int             { return c.addrIndex }
 func (c *stdconn) LocalAddr() net.Addr        { return c.localAddr }
 func (c *stdconn) RemoteAddr() net.Addr       { return c.remoteAddr }
 func (c *stdconn) Wake()                      { c.loop.ch <- wakeReq{c} }
+func (c *stdconn) SetActiveTime(t time.Time)  { atomic.SwapInt64(&c.activeTime, t.Unix()) }
+func (c *stdconn) ActiveTime() time.Time      { return time.Unix(atomic.LoadInt64(&c.activeTime), 0) }
 
 type stdin struct {
 	c  *stdconn
@@ -98,7 +106,7 @@ func (s *stdserver) signalShutdown(err error) {
 	s.cond.L.Unlock()
 }
 
-func stdserve(events Events, listeners []*listener) error {
+func stdserve(events Events, waitTimeout time.Duration, listeners []*listener) error {
 	numLoops := events.NumLoops
 	if numLoops <= 0 {
 		if numLoops == 0 {
@@ -112,6 +120,7 @@ func stdserve(events Events, listeners []*listener) error {
 	s.events = events
 	s.lns = listeners
 	s.cond = sync.NewCond(&sync.Mutex{})
+	s.waitTimeout = waitTimeout
 
 	//println("-- server starting")
 	if events.Serving != nil {
@@ -128,11 +137,14 @@ func stdserve(events Events, listeners []*listener) error {
 		}
 	}
 	for i := 0; i < numLoops; i++ {
-		s.loops = append(s.loops, &stdloop{
+		l := &stdloop{
 			idx:   i,
 			ch:    make(chan interface{}),
 			conns: make(map[*stdconn]bool),
-		})
+			tw:    timingwheel.NewTimingWheel(time.Second, 60),
+		}
+		s.loops = append(s.loops, l)
+		l.tw.Start()
 	}
 	var ferr error
 	defer func() {
@@ -159,6 +171,7 @@ func stdserve(events Events, listeners []*listener) error {
 		s.loopwg.Add(len(s.loops))
 		for _, l := range s.loops {
 			l.ch <- errCloseConns
+			l.tw.Stop()
 		}
 		s.loopwg.Wait()
 
@@ -311,16 +324,19 @@ func stdloopError(s *stdserver, l *stdloop, c *stdconn, err error) error {
 	switch atomic.LoadInt32(&c.done) {
 	case 0: // read error
 		c.conn.Close()
+		c.closed = true
 		if err == io.EOF {
 			err = nil
 		}
 	case 1: // closed
 		c.conn.Close()
+		c.closed = true
 		err = nil
 	case 2: // detached
 		err = nil
 		if s.events.Detached == nil {
 			c.conn.Close()
+			c.closed = true
 		} else {
 			closeEvent = false
 			switch s.events.Detached(c, &stddetachedConn{c.conn, c.donein}) {
@@ -371,12 +387,31 @@ func (c *stddetachedConn) Close() error {
 
 func (c *stddetachedConn) Wake() {}
 
+func stdCloseTimeoutConn(s *stdserver, l *stdloop, c *stdconn) func() {
+	return func() {
+		if c.closed {
+			return
+		}
+
+		now := time.Now()
+		intervals := now.Sub(c.ActiveTime())
+		if intervals >= s.waitTimeout {
+			stdloopClose(s, l, c)
+		} else {
+			l.tw.AfterFunc(s.waitTimeout-intervals, stdCloseTimeoutConn(s, l, c))
+		}
+	}
+}
+
 func stdloopRead(s *stdserver, l *stdloop, c *stdconn, in []byte) error {
 	if atomic.LoadInt32(&c.done) == 2 {
 		// should not ignore reads for detached connections
 		c.donein = append(c.donein, in...)
 		return nil
 	}
+
+	c.SetActiveTime(time.Now())
+
 	if s.events.Data != nil {
 		out, action := s.events.Data(c, in)
 		if len(out) > 0 {
@@ -423,6 +458,7 @@ func stdloopDetach(s *stdserver, l *stdloop, c *stdconn) error {
 func stdloopClose(s *stdserver, l *stdloop, c *stdconn) error {
 	atomic.StoreInt32(&c.done, 1)
 	c.conn.SetReadDeadline(time.Now())
+	c.closed = true
 	return nil
 }
 
@@ -431,6 +467,11 @@ func stdloopAccept(s *stdserver, l *stdloop, c *stdconn) error {
 	c.addrIndex = c.lnidx
 	c.localAddr = s.lns[c.lnidx].lnaddr
 	c.remoteAddr = c.conn.RemoteAddr()
+	c.SetActiveTime(time.Now())
+
+	if s.waitTimeout > 0 {
+		l.tw.AfterFunc(s.waitTimeout, stdCloseTimeoutConn(s, l, c))
+	}
 
 	if s.events.Opened != nil {
 		out, opts, action := s.events.Opened(c)

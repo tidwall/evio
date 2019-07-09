@@ -5,6 +5,7 @@
 package main
 
 import (
+	"time"
 	"flag"
 	"fmt"
 	"log"
@@ -55,5 +56,5 @@ func main() {
 	if stdlib {
 		scheme += "-net"
 	}
-	log.Fatal(evio.Serve(events, fmt.Sprintf("%s://:%d?reuseport=%t", scheme, port, reuseport)))
+	log.Fatal(evio.Serve(events, time.Second * 10, fmt.Sprintf("%s://:%d?reuseport=%t", scheme, port, reuseport)))
 }

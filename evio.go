@@ -138,7 +138,7 @@ type Events struct {
 //  unix  - Unix Domain Socket
 //
 // The "tcp" network scheme is assumed when one is not specified.
-func Serve(events Events, addr ...string) error {
+func Serve(events Events, waitTimeout time.Duration, addr ...string) error {
 	var lns []*listener
 	defer func() {
 		for _, ln := range lns {
@@ -186,9 +186,9 @@ func Serve(events Events, addr ...string) error {
 		lns = append(lns, &ln)
 	}
 	if stdlib {
-		return stdserve(events, lns)
+		return stdserve(events, waitTimeout, lns)
 	}
-	return serve(events, lns)
+	return serve(events, waitTimeout, lns)
 }
 
 // InputStream is a helper type for managing input streams from inside

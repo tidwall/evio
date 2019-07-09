@@ -130,9 +130,9 @@ func testServe(network, addr string, unix bool, nclients, nloops int, balance Lo
 		socket := strings.Replace(addr, ":", "socket", 1)
 		os.RemoveAll(socket)
 		defer os.RemoveAll(socket)
-		err = Serve(events, network+"://"+addr, "unix://"+socket)
+		err = Serve(events, 0, network+"://"+addr, "unix://"+socket)
 	} else {
-		err = Serve(events, network+"://"+addr)
+		err = Serve(events, 0, network+"://"+addr)
 	}
 	if err != nil {
 		panic(err)
@@ -221,9 +221,9 @@ func testTick(network, addr string, stdlib bool) {
 		return
 	}
 	if stdlib {
-		must(Serve(events, network+"-net://"+addr))
+		must(Serve(events, 0, network+"-net://"+addr))
 	} else {
-		must(Serve(events, network+"://"+addr))
+		must(Serve(events, 0, network+"://"+addr))
 	}
 	dur := time.Since(start)
 	if dur < 250&time.Millisecond || dur > time.Second {
@@ -292,9 +292,9 @@ func testShutdown(network, addr string, stdlib bool) {
 		return
 	}
 	if stdlib {
-		must(Serve(events, network+"-net://"+addr))
+		must(Serve(events, 0, network+"-net://"+addr))
 	} else {
-		must(Serve(events, network+"://"+addr))
+		must(Serve(events, 0, network+"://"+addr))
 	}
 	if clients != 0 {
 		panic("did not call close on all clients")
@@ -379,9 +379,9 @@ func testDetach(network, addr string, stdlib bool) {
 		return
 	}
 	if stdlib {
-		must(Serve(events, network+"-net://"+addr))
+		must(Serve(events, 0, network+"-net://"+addr))
 	} else {
-		must(Serve(events, network+"://"+addr))
+		must(Serve(events, 0, network+"://"+addr))
 	}
 }
 
@@ -390,13 +390,13 @@ func TestBadAddresses(t *testing.T) {
 	events.Serving = func(srv Server) (action Action) {
 		return Shutdown
 	}
-	if err := Serve(events, "tulip://howdy"); err == nil {
+	if err := Serve(events, 0, "tulip://howdy"); err == nil {
 		t.Fatalf("expected error")
 	}
-	if err := Serve(events, "howdy"); err == nil {
+	if err := Serve(events, 0, "howdy"); err == nil {
 		t.Fatalf("expected error")
 	}
-	if err := Serve(events, "tcp://"); err != nil {
+	if err := Serve(events, 0, "tcp://"); err != nil {
 		t.Fatalf("expected nil, got '%v'", err)
 	}
 }
@@ -452,7 +452,7 @@ func TestReuseInputBuffer(t *testing.T) {
 			}()
 			return
 		}
-		must(Serve(events, "tcp://:9991"))
+		must(Serve(events, 0, "tcp://:9991"))
 	}
 
 }
@@ -471,7 +471,7 @@ func TestReuseport(t *testing.T) {
 		}
 		go func(t string) {
 			defer wg.Done()
-			must(Serve(events, "tcp://:9991?reuseport="+t))
+			must(Serve(events, 0, "tcp://:9991?reuseport="+t))
 		}(t)
 	}
 	wg.Wait()
