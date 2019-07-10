@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"time"
 )
 
 func (ln *listener) close() {
@@ -28,8 +29,8 @@ func (ln *listener) system() error {
 	return nil
 }
 
-func serve(events Events, listeners []*listener) error {
-	return stdserve(events, listeners)
+func serve(events Events, waitTimeout time.Duration, listeners []*listener) error {
+	return stdserve(events, waitTimeout, listeners)
 }
 
 func reuseportListenPacket(proto, addr string) (l net.PacketConn, err error) {
