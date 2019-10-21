@@ -6,6 +6,7 @@ package internal
 
 import (
 	"syscall"
+	"unsafe"
 )
 
 // Poll ...
@@ -44,7 +45,8 @@ func (p *Poll) Close() error {
 // Trigger ...
 func (p *Poll) Trigger(note interface{}) error {
 	p.notes.Add(note)
-	_, err := syscall.Write(p.wfd, []byte{0, 0, 0, 0, 0, 0, 0, 1})
+	var x uint64 = 1
+	_, err := syscall.Write(p.wfd, (*(*[8]byte)(unsafe.Pointer(&x)))[:])
 	return err
 }
 
