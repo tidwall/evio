@@ -291,7 +291,7 @@ func loopAccept(s *server, l *loop, fd int) error {
 				return err
 			}
 			c := &conn{fd: nfd, sa: sa, lnidx: i, loop: l}
-			c.out = make([]byte, 0, 4096)
+			c.out = nil
 			l.fdconns[c.fd] = c
 			l.poll.AddReadWrite(c.fd)
 			atomic.AddInt32(&l.count, 1)
@@ -381,7 +381,7 @@ func loopWrite(s *server, l *loop, c *conn) error {
 		// release the connection output page if it goes over page size,
 		// otherwise keep reusing existing page.
 		if cap(c.out) > 4096 {
-			c.out = make([]byte, 0, 4096)
+			c.out = nil
 		} else {
 			c.out = c.out[:0]
 		}
