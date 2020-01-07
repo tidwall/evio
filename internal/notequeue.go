@@ -4,26 +4,12 @@
 
 package internal
 
-import (
-	"runtime"
-	"sync/atomic"
-)
+import "sync"
 
 // this is a good candiate for a lock-free structure.
 
-type spinlock struct{ lock uintptr }
-
-func (l *spinlock) Lock() {
-	for !atomic.CompareAndSwapUintptr(&l.lock, 0, 1) {
-		runtime.Gosched()
-	}
-}
-func (l *spinlock) Unlock() {
-	atomic.StoreUintptr(&l.lock, 0)
-}
-
 type noteQueue struct {
-	mu    spinlock
+	mu    sync.Mutex
 	notes []interface{}
 }
 
@@ -49,5 +35,13 @@ func (q *noteQueue) ForEach(iter func(note interface{}) error) error {
 			return err
 		}
 	}
+	q.mu.Lock()
+	if q.notes == nil {
+		for i := range notes {
+			notes[i] = nil
+		}
+		q.notes = notes[:0]
+	}
+	q.mu.Unlock()
 	return nil
 }
