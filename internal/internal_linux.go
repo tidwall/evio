@@ -68,8 +68,9 @@ func (p *Poll) Wait(iter func(fd int, note interface{}) error) error {
 				if err := iter(fd, nil); err != nil {
 					return err
 				}
-			} else {
-
+			} else if fd == p.wfd {
+				var data [16]byte
+				syscall.Read(p.wfd, data[:])
 			}
 		}
 	}
