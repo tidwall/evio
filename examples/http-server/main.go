@@ -167,11 +167,11 @@ func parsereq(data []byte, req *request) (leftover []byte, err error) {
 			req.method = sdata[s:i]
 			for i, s = i+1, i+1; i < len(sdata); i++ {
 				if sdata[i] == '?' && q == -1 {
-					q = i - s
+					q = i
 				} else if sdata[i] == ' ' {
 					if q != -1 {
 						req.path = sdata[s:q]
-						req.query = req.path[q+1 : i]
+						req.query = sdata[q+1 : i]
 					} else {
 						req.path = sdata[s:i]
 					}
