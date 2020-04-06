@@ -44,10 +44,12 @@ func (p *Poll) Close() error {
 
 // Trigger ...
 func (p *Poll) Trigger(note interface{}) error {
-	p.notes.Add(note)
-	var x uint64 = 1
-	_, err := syscall.Write(p.wfd, (*(*[8]byte)(unsafe.Pointer(&x)))[:])
-	return err
+	if p.notes.Add(note) {
+		var x uint64 = 1
+		_, err := syscall.Write(p.wfd, (*(*[8]byte)(unsafe.Pointer(&x)))[:])
+		return err
+	}
+	return nil
 }
 
 // Wait ...

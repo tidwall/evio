@@ -44,13 +44,15 @@ func (p *Poll) Close() error {
 
 // Trigger ...
 func (p *Poll) Trigger(note interface{}) error {
-	p.notes.Add(note)
-	_, err := syscall.Kevent(p.fd, []syscall.Kevent_t{{
-		Ident:  0,
-		Filter: syscall.EVFILT_USER,
-		Fflags: syscall.NOTE_TRIGGER,
-	}}, nil, nil)
-	return err
+	if p.notes.Add(note) {
+		_, err := syscall.Kevent(p.fd, []syscall.Kevent_t{{
+			Ident:  0,
+			Filter: syscall.EVFILT_USER,
+			Fflags: syscall.NOTE_TRIGGER,
+		}}, nil, nil)
+		return err
+	}
+	return nil
 }
 
 // Wait ...
