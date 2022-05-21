@@ -93,7 +93,7 @@ The `Tick` event fires ticks at a specified interval.
 The first tick fires immediately after the `Serving` events.
 
 ```go
-events.Tick = func() (delay time.Duration, action Action){
+events.Tick = func() (delay time.Duration, action evio.Action){
 	log.Printf("tick")
 	delay = time.Second
 	return
