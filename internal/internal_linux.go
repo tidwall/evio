@@ -9,6 +9,10 @@ import (
 	"unsafe"
 )
 
+const (
+	_EFD_NONBLOCK = 0x800
+)
+
 // Poll ...
 type Poll struct {
 	fd    int // epoll fd
@@ -24,7 +28,7 @@ func OpenPoll() *Poll {
 		panic(err)
 	}
 	l.fd = p
-	r0, _, e0 := syscall.Syscall(syscall.SYS_EVENTFD2, 0, 0, 0)
+	r0, _, e0 := syscall.Syscall(syscall.SYS_EVENTFD2, 0, _EFD_NONBLOCK, 0)
 	if e0 != 0 {
 		syscall.Close(p)
 		panic(err)
