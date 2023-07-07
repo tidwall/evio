@@ -333,6 +333,9 @@ func loopUDPRead(s *server, l *loop, lnidx, fd int) error {
 				s.events.PreWrite()
 			}
 			syscall.Sendto(fd, out, 0, sa)
+			if s.events.PostWrite != nil {
+				s.events.PostWrite(c)
+			}
 		}
 		switch action {
 		case Shutdown:
@@ -390,6 +393,9 @@ func loopWrite(s *server, l *loop, c *conn) error {
 	}
 	if len(c.out) == 0 && c.action == None {
 		l.poll.ModRead(c.fd)
+	}
+	if len(c.out) == 0 && s.events.PostWrite != nil {
+		s.events.PostWrite(c)
 	}
 	return nil
 }

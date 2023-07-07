@@ -384,6 +384,9 @@ func stdloopRead(s *stdserver, l *stdloop, c *stdconn, in []byte) error {
 				s.events.PreWrite()
 			}
 			c.conn.Write(out)
+			if s.events.PostWrite != nil {
+				s.events.PostWrite(c)
+			}
 		}
 		switch action {
 		case Shutdown:
@@ -405,6 +408,9 @@ func stdloopReadUDP(s *stdserver, l *stdloop, c *stdudpconn) error {
 				s.events.PreWrite()
 			}
 			s.lns[c.addrIndex].pconn.WriteTo(out, c.remoteAddr)
+			if s.events.PostWrite != nil {
+				s.events.PostWrite(c)
+			}
 		}
 		switch action {
 		case Shutdown:
@@ -439,6 +445,9 @@ func stdloopAccept(s *stdserver, l *stdloop, c *stdconn) error {
 				s.events.PreWrite()
 			}
 			c.conn.Write(out)
+			if s.events.PostWrite != nil {
+				s.events.PostWrite(c)
+			}
 		}
 		if opts.TCPKeepAlive > 0 {
 			if c, ok := c.conn.(*net.TCPConn); ok {
