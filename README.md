@@ -105,7 +105,7 @@ events.Tick = func() (delay time.Duration, action Action){
 The `Serve` function can bind to UDP addresses. 
 
 - All incoming and outgoing packets are not buffered and sent individually.
-- The `Opened` and `Closed` events are not availble for UDP sockets, only the `Data` event.
+- The `Opened` and `Closed` events are not available for UDP sockets, only the `Data` event.
 
 ## Multithreaded
 
